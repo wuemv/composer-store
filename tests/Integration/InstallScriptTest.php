@@ -29,16 +29,25 @@ final class InstallScriptTest extends IntegrationTestCase
 
         $this->assertSame(0, $result->exitCode, $result->describe());
         $allow = '> composer global config allow-plugins.wuemv/composer-store true';
-        $this->assertStringContainsString($allow, $result->stdout);
+        $this->assertSame($this->allowsPlugins($result), str_contains($result->stdout, $allow));
         $this->assertStringContainsString('> composer store:status', $result->stdout);
         $this->assertStringContainsString('composer-store is installed.', $result->stdout);
         $manifest = Files::readJson($this->home . '/composer.json');
         $this->assertSame(['wuemv/composer-store' => '@dev'], $manifest['require'] ?? null);
         $config = is_array($manifest['config'] ?? null) ? $manifest['config'] : [];
-        $this->assertSame(['wuemv/composer-store' => true], $config['allow-plugins'] ?? null);
+        $allowed = $this->allowsPlugins($result) ? ['wuemv/composer-store' => true] : null;
+        $this->assertSame($allowed, $config['allow-plugins'] ?? null);
         $repositories = is_array($manifest['repositories'] ?? null) ? $manifest['repositories'] : [];
-        $repository = ['type' => 'path', 'url' => realpath($this->env->plugin)];
-        $this->assertSame($repository, $repositories['composer-store'] ?? null);
+        // Composer 2.10 keeps a list and names the entry; earlier versions key it by name.
+        $plugin = $repositories['composer-store'] ?? null;
+        foreach ($repositories as $repository) {
+            if (is_array($repository) && ($repository['name'] ?? null) === 'composer-store') {
+                $plugin = $repository;
+            }
+        }
+        $plugin = is_array($plugin) ? $plugin : [];
+        $this->assertSame('path', $plugin['type'] ?? null, (string) json_encode($repositories));
+        $this->assertSame(realpath($this->env->plugin), $plugin['url'] ?? null);
 
         // Projects now go through the store.
         $project = $this->createProject('app', ['acme/alpha' => '1.0.0']);
@@ -56,7 +65,7 @@ final class InstallScriptTest extends IntegrationTestCase
         $this->assertSame(0, $result->exitCode, $result->describe());
         $commands = [
             'composer global config repositories.composer-store vcs https://github.com/wuemv/composer-store',
-            'composer global config allow-plugins.wuemv/composer-store true',
+            ...$this->allowsPlugins($result) ? ['composer global config allow-plugins.wuemv/composer-store true'] : [],
             'composer global require --no-interaction wuemv/composer-store:@dev',
         ];
         foreach ($commands as $command) {
@@ -87,6 +96,18 @@ final class InstallScriptTest extends IntegrationTestCase
         $this->assertSame(1, $nowhere->exitCode);
         $refusal = '--from takes github, packagist, a repository URL or a directory';
         $this->assertStringContainsString($refusal, $nowhere->stderr);
+    }
+
+    /**
+     * Whether the script's Composer has allow-plugins, which came with Composer 2.2.
+     */
+    private function allowsPlugins(ProcessResult $result): bool
+    {
+        if (preg_match('{^Composer (\d+\.\d+\.\d+),}', $result->stdout, $match) !== 1) {
+            $this->fail('No Composer version in: ' . $result->stdout);
+        }
+
+        return version_compare($match[1], '2.2.0', '>=');
     }
 
     /**

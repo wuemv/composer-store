@@ -217,20 +217,21 @@ function isPhpScript(string $file): bool
  */
 function composerVersion(array $composer): ?string
 {
-    $process = @proc_open(
+    $output = tmpfile();
+    $null = PHP_OS_FAMILY === 'Windows' ? 'NUL' : '/dev/null';
+    $process = $output === false ? false : @proc_open(
         array_merge($composer, ['--version', '--no-ansi']),
-        [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
+        [0 => ['file', $null, 'r'], 1 => $output, 2 => ['file', $null, 'w']],
         $pipes
     );
-    if (!is_resource($process)) {
+    if ($output === false || !is_resource($process)) {
         return null;
     }
-    fclose($pipes[0]);
-    $output = (string) stream_get_contents($pipes[1]);
-    stream_get_contents($pipes[2]);
-    fclose($pipes[1]);
-    fclose($pipes[2]);
-    if (proc_close($process) !== 0 || preg_match('{Composer (?:version )?(\d+\.\d+\.\d+)}', $output, $match) !== 1) {
+    $status = proc_close($process);
+    rewind($output);
+    $text = (string) stream_get_contents($output);
+    fclose($output);
+    if ($status !== 0 || preg_match('{Composer (?:version )?(\d+\.\d+\.\d+)}', $text, $match) !== 1) {
         return null;
     }
 
@@ -238,7 +239,9 @@ function composerVersion(array $composer): ?string
 }
 
 /**
- * Shows the command as it would be typed, then runs it with this script's input and output.
+ * Shows the command as it would be typed, then runs it with this script's input and output. Output that
+ * goes to a file goes through a temp file first: before proc_open() passes a file on, PHP moves its offset
+ * back to the end of this script's own writes, so each Composer would write over the one before.
  *
  * @param list<string> $composer
  * @param list<string> $args
@@ -251,12 +254,24 @@ function runComposer(array $composer, array $args, bool $dryRun): int
     if ($dryRun) {
         return 0;
     }
-    $process = @proc_open(array_merge($composer, $args), [0 => STDIN, 1 => STDOUT, 2 => STDERR], $pipes);
-    if (!is_resource($process)) {
-        return 1;
+    $descriptors = [0 => STDIN, 1 => STDOUT, 2 => STDERR];
+    $relays = [];
+    foreach ([1, 2] as $fd) {
+        $temp = stream_get_meta_data($descriptors[$fd])['seekable'] ? tmpfile() : false;
+        if ($temp !== false) {
+            $relays[] = [$temp, $descriptors[$fd]];
+            $descriptors[$fd] = $temp;
+        }
+    }
+    $process = @proc_open(array_merge($composer, $args), $descriptors, $pipes);
+    $status = is_resource($process) ? proc_close($process) : 1;
+    foreach ($relays as list($temp, $stream)) {
+        rewind($temp);
+        stream_copy_to_stream($temp, $stream);
+        fclose($temp);
     }
 
-    return proc_close($process);
+    return $status;
 }
 
 /**
