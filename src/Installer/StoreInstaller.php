@@ -66,6 +66,12 @@ final class StoreInstaller extends LibraryInstaller
 
     private ?SkipRules $skipRules = null;
 
+    /** @var array<string, ArchiveDownloader|null> what storeDownloader() decided, per package and installation source */
+    private array $storeDownloaders = [];
+
+    /** @var array<int, true> the package objects whose archive download() left out */
+    private array $skippedDownloads = [];
+
     public function __construct(
         IOInterface $io,
         Composer $composer,
@@ -95,6 +101,47 @@ final class StoreInstaller extends LibraryInstaller
     public function releaseStore(): void
     {
         $this->lock->release();
+    }
+
+    /**
+     * Leaves out copying the archive from Composer's cache, or downloading it, when the store already
+     * holds the package: installCode() links it from there and never opens the archive. The store lock,
+     * taken here at the latest, keeps store:prune from removing the entry until the run ends.
+     *
+     * @return PromiseInterface<mixed>|null
+     */
+    public function download(PackageInterface $package, ?PackageInterface $prevPackage = null)
+    {
+        if ($this->distComesFirst($package, $prevPackage)) {
+            // What DownloadManager::download() sets before it fetches the archive.
+            $package->setInstallationSource('dist');
+            if ($this->storeDownloader($package) !== null && ($this->store->entryFor($package)?->isValid() ?? false)) {
+                $this->skippedDownloads[spl_object_id($package)] = true;
+                $this->initializeVendorDir();
+
+                return \React\Promise\resolve(null);
+            }
+        }
+
+        return parent::download($package, $prevPackage);
+    }
+
+    /**
+     * Whether Composer installs the package from its dist rather than its source: the first of the
+     * sources DownloadManager::download() tries, which depends on --prefer-source, preferred-install
+     * and the version installed before. Composer keeps that private, so this asks it through
+     * reflection; false when that fails, and the archive is fetched as usual.
+     */
+    private function distComesFirst(PackageInterface $package, ?PackageInterface $prevPackage): bool
+    {
+        try {
+            $sources = (new \ReflectionMethod(DownloadManager::class, 'getAvailableSources'))
+                ->invoke($this->downloads, $package, $prevPackage);
+        } catch (\Throwable) {
+            return false;
+        }
+
+        return is_array($sources) && ($sources[0] ?? null) === 'dist';
     }
 
     /**
@@ -142,6 +189,17 @@ final class StoreInstaller extends LibraryInstaller
         string $operation,
     ): PromiseInterface {
         $entry = $this->store->entryFor($package);
+        if (isset($this->skippedDownloads[spl_object_id($package)]) && !($entry?->isValid() ?? false)) {
+            // The entry went away after download() left the archive out, so fetch it after all. Should
+            // the dist fail and Composer fall back to the source, install that as usual.
+            unset($this->skippedDownloads[spl_object_id($package)]);
+
+            return self::promise($this->downloads->download($package, $path))->then(
+                fn () => $package->getInstallationSource() === 'dist'
+                    ? $this->installFromStore($package, $downloader, $path, $operation)
+                    : parent::installCode($package)
+            );
+        }
         if ($entry === null) {
             return self::promise($this->downloads->install($package, $path));
         }
@@ -289,9 +347,20 @@ final class StoreInstaller extends LibraryInstaller
 
     /**
      * The archive downloader to extract the package into the store with, or null when the package
-     * must be installed by Composer as usual.
+     * must be installed by Composer as usual. Decided once per package, in download() or on install,
+     * unless Composer turns to the source after the dist failed.
      */
     private function storeDownloader(PackageInterface $package): ?ArchiveDownloader
+    {
+        $key = spl_object_id($package) . ' ' . $package->getInstallationSource();
+        if (!array_key_exists($key, $this->storeDownloaders)) {
+            $this->storeDownloaders[$key] = $this->findStoreDownloader($package);
+        }
+
+        return $this->storeDownloaders[$key];
+    }
+
+    private function findStoreDownloader(PackageInterface $package): ?ArchiveDownloader
     {
         if (
             $package->getInstallationSource() !== 'dist'

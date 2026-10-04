@@ -7,6 +7,7 @@ namespace ComposerStore\Tests\Integration;
 use ComposerStore\Store\TreeHasher;
 use ComposerStore\Tests\Support\Files;
 use ComposerStore\Tests\Support\Process;
+use PHPUnit\Framework\Attributes\RequiresOperatingSystem;
 
 final class InstallTest extends IntegrationTestCase
 {
@@ -96,6 +97,47 @@ final class InstallTest extends IntegrationTestCase
 
         $result = Process::run([PHP_BINARY, 'vendor/bin/beta'], $project, Process::environmentWithoutComposer());
         $this->assertSame('beta runs with alpha 2.0.0' . PHP_EOL, $result->stdout, $result->describe());
+    }
+
+    public function testPackagesInTheStoreAreNotFetchedFromComposersCache(): void
+    {
+        $first = $this->createProject('first', ['acme/alpha' => '1.0.0']);
+        $second = $this->createProject('second', ['acme/alpha' => '1.0.0']);
+        $fetched = '{(Loading|Downloading) acme/alpha \(1\.0\.0\)}';
+
+        // The first install extracts the archive into the store, so Composer fetches it as usual.
+        $this->assertMatchesRegularExpression($fetched, $this->composer($first, 'install', '-vvv'));
+
+        // The second links the store's copy, and would leave the archive unused.
+        $output = $this->composer($second, 'install', '-vvv');
+        $this->assertStringContainsString('acme/alpha (1.0.0): Linking from store', $output);
+        $this->assertDoesNotMatchRegularExpression($fetched, $output);
+        $this->assertLinkedFromStore($second, 'acme/alpha', '1.0.0');
+        $installed = Files::readJson($second . '/vendor/composer/installed.json');
+        $packages = is_array($installed['packages'] ?? null) ? $installed['packages'] : [];
+        $alpha = is_array($packages[0] ?? null) ? $packages[0] : [];
+        $this->assertSame('acme/alpha', $alpha['name'] ?? null);
+        $this->assertSame('dist', $alpha['installation-source'] ?? null, 'as if Composer had fetched the archive');
+        $this->assertSame([], glob($second . '/vendor/composer/tmp-*') ?: []);
+    }
+
+    #[RequiresOperatingSystem('Linux|Darwin')]
+    public function testAStoreEntryDeletedAfterTheDownloadStepIsFetchedAfterAll(): void
+    {
+        $first = $this->createProject('first', ['acme/alpha' => '1.0.0']);
+        $this->composer($first, 'install');
+        // Deleted by hand between Composer's download step, which the store let it skip, and the install.
+        $second = $this->createProject('second', ['acme/alpha' => '1.0.0']);
+        $manifest = Files::readJson($second . '/composer.json');
+        $entry = $this->storeEntry('acme/alpha', '1.0.0');
+        $manifest['scripts'] = ['pre-package-install' => 'rm -rf ' . escapeshellarg($entry)];
+        Files::writeJson($second . '/composer.json', $manifest);
+
+        $output = $this->composer($second, 'install', '-vvv');
+
+        $this->assertMatchesRegularExpression('{(Loading|Downloading) acme/alpha \(1\.0\.0\)}', $output);
+        $this->assertStringContainsString('acme/alpha (1.0.0): Extracting archive into the store', $output);
+        $this->assertLinkedFromStore($second, 'acme/alpha', '1.0.0');
     }
 
     public function testOnLinuxEachPackageIsHardLinkedByOneCp(): void

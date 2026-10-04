@@ -19,10 +19,11 @@ final class SkipRulesTest extends IntegrationTestCase
 
         $output = $this->composer($project, 'install', '-v');
 
-        $this->assertStringContainsString(
-            'composer-store: acme/gamma is excluded in extra.composer-store.exclude, installing it without the store',
-            $output
-        );
+        // Once, although both Composer's download step and its install step ask.
+        $this->assertSame(1, substr_count(
+            $output,
+            'composer-store: acme/gamma is excluded in extra.composer-store.exclude, installing it without the store'
+        ));
         $this->assertGammaWasNotLinked($project);
     }
 
