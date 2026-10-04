@@ -1,8 +1,7 @@
 name: CI
 
-# Actions minutes are limited, and macOS and Windows minutes count several times: pushes that only
-# change Markdown run nothing, and a newer push to the same branch or pull request cancels the run
-# in progress.
+# Pushes that only change Markdown run nothing, and a newer push to the same branch or pull request
+# cancels the run in progress.
 on:
   push:
     paths-ignore:
@@ -56,8 +55,8 @@ jobs:
         include:
           # Adds a Btrfs mount to this job, for the reflink tests (macOS runners have APFS anyway).
           - { os: ubuntu-latest, php: '8.4', composer: '2', reflink: true }
-          # One job each on macOS and Windows, whose minutes count ten and two times: the newest
-          # PHP and Composer. Ubuntu covers the older versions.
+          # One job each on macOS and Windows, with the newest PHP and Composer: Ubuntu covers the
+          # older versions.
           - { os: macos-latest, php: '8.5', composer: '2' }
           - { os: windows-latest, php: '8.5', composer: '2' }
     steps:
