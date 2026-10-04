@@ -1,13 +1,8 @@
 name: Placement
 
 # Times ways of putting package files into vendor/ (benchmarks/run-placement.php), on a store and a
-# Composer cache filled by one run of the benchmark. Runs when the script changes, or by hand.
+# Composer cache filled by one run of the benchmark. Runs by hand, like the Benchmarks workflow.
 on:
-  push:
-    paths:
-      - 'benchmarks/Placement.php'
-      - 'benchmarks/run-placement.php'
-      - '.github/workflows/placement.yml'
   workflow_dispatch:
 
 permissions:
@@ -17,6 +12,7 @@ jobs:
   placement:
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:

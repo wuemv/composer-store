@@ -1,8 +1,19 @@
 name: CI
 
+# Actions minutes are limited, and macOS and Windows minutes count several times: pushes that only
+# change Markdown run nothing, and a newer push to the same branch or pull request cancels the run
+# in progress.
 on:
   push:
+    paths-ignore:
+      - '**.md'
   pull_request:
+    paths-ignore:
+      - '**.md'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -11,6 +22,7 @@ jobs:
   static:
     name: PHPStan and PHPCS
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: shivammathur/setup-php@v2
@@ -30,6 +42,7 @@ jobs:
   tests:
     name: PHP ${{ matrix.php }}, Composer ${{ matrix.composer }}, ${{ matrix.os }}${{ matrix.reflink && ', Btrfs' || '' }}
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -73,6 +86,7 @@ jobs:
   laravel:
     name: Network tests (Laravel app, composer-patches)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: shivammathur/setup-php@v2
