@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace ComposerStore\Tests\Unit\Link;
 
+use ComposerStore\Link\CloneFile;
 use ComposerStore\Link\Cloner;
 use ComposerStore\Link\LinkException;
 use ComposerStore\Tests\Support\FakeCp;
@@ -14,7 +15,7 @@ use PHPUnit\Framework\TestCase;
 /**
  * Most tests run the Linux and macOS commands through a stand-in cp that copies, so they pass on any
  * filesystem. testTheRealCpAgreesWithTheProbe uses the system's own cp, and clones for real on
- * filesystems with reflinks.
+ * filesystems with reflinks. On macOS, testMacClonesWholeTreesWithClonefile calls clonefile(2) for real.
  */
 final class ClonerTest extends TestCase
 {
@@ -49,6 +50,7 @@ final class ClonerTest extends TestCase
         $cloner = new Cloner('Linux');
 
         $this->assertTrue($cloner->isAvailable());
+        $this->assertFalse($cloner->clonesInProcess());
         $this->assertTrue($cloner->isSupported($this->dir));
         $cloner->cloneTree($this->source, $this->dir . '/target');
 
@@ -67,8 +69,9 @@ final class ClonerTest extends TestCase
     public function testMacClonesWithCpCOnApfs(): void
     {
         $log = $this->useFakeCp(mounts: "/dev/disk3s1s1 on / (apfs, sealed, local, read-only, journaled)\n");
-        $cloner = new Cloner('Darwin');
+        $cloner = new Cloner('Darwin', inProcess: false);
 
+        $this->assertFalse($cloner->clonesInProcess());
         $this->assertTrue($cloner->isSupported($this->dir));
         $cloner->cloneTree($this->source, $this->dir . '/target');
 
@@ -89,7 +92,7 @@ final class ClonerTest extends TestCase
             '/dev/disk5s1 on ' . $this->dir . '/external (hfs, local, nodev, nosuid, journaled)',
             '',
         ]));
-        $cloner = new Cloner('Darwin');
+        $cloner = new Cloner('Darwin', inProcess: false);
 
         $this->assertFalse($cloner->isSupported($this->dir . '/external'));
         $this->assertFalse(is_file($log), 'cp is not even tried');
@@ -111,11 +114,37 @@ final class ClonerTest extends TestCase
         }
     }
 
+    #[RequiresOperatingSystem('Darwin')]
+    public function testMacClonesWholeTreesWithClonefile(): void
+    {
+        if (CloneFile::load() === null) {
+            $this->markTestSkipped('clonefile(2) needs the FFI extension');
+        }
+        $log = $this->useFakeCp();
+        touch($this->source . '/src/Foo.php', 1_000_000_000);
+        $cloner = new Cloner();
+
+        $this->assertTrue($cloner->clonesInProcess());
+        $this->assertTrue($cloner->isSupported($this->dir));
+        $cloner->cloneTree($this->source, $this->dir . '/target');
+
+        $this->assertClonedTree($this->dir . '/target');
+        $this->assertSame(1_000_000_000, filemtime($this->dir . '/target/src/Foo.php'));
+        $this->assertFileDoesNotExist($log, 'cp did not run');
+        try {
+            $cloner->cloneTree($this->source, $this->dir . '/target');
+            $this->fail('cloneTree() did not fail');
+        } catch (LinkException $e) {
+            $this->assertStringEndsWith('/target: File exists', $e->getMessage());
+        }
+    }
+
     public function testOtherSystemsHaveNoClones(): void
     {
         $cloner = new Cloner('Windows');
 
         $this->assertFalse($cloner->isAvailable());
+        $this->assertFalse($cloner->clonesInProcess());
         $this->assertFalse($cloner->isSupported($this->dir));
         $this->expectException(LinkException::class);
         $cloner->cloneTree($this->source, $this->dir . '/target');
@@ -123,7 +152,7 @@ final class ClonerTest extends TestCase
 
     public function testTheRealCpAgreesWithTheProbe(): void
     {
-        $cloner = new Cloner();
+        $cloner = new Cloner(PHP_OS_FAMILY, inProcess: false);
 
         if (!$cloner->isSupported($this->dir)) {
             $this->expectException(LinkException::class);

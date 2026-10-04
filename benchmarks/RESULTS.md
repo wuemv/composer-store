@@ -192,3 +192,24 @@ The same run, on the Btrfs image.
 | 5 projects | 384 MiB | 195 MiB (−49%) | 164 MiB (−57%) |
 
 The store alone, per `du`: 111 MiB.
+
+## Placing package files
+
+`run-placement.php` times only the placing of files, on the store and Composer cache of one `run.php` run: the 148 package versions of the five projects, 14,229 files, each package placed once into an empty directory. Median of 3 rounds, PHP 8.4.26, [Placement run 37209478073](https://github.com/wuemv/composer-store/actions/runs/37209478073) at commit 2cca633, on the same runners as above.
+
+| Method | Linux, ext4 | Linux, Btrfs | macOS, APFS |
+|---|---:|---:|---:|
+| `unzip`, one package at a time | 1.81 s | 1.93 s | 5.05 s |
+| `unzip`, 10 at a time (Composer without the plugin) | 0.55 s | 1.28 s | 2.57 s |
+| PHP `copy()` per file | 1.09 s | 1.28 s | 3.86 s |
+| PHP `link()` per file (the plugin's hard links) | 0.48 s | 0.56 s | 4.58 s |
+| `cp -al` (Linux) or `pax -rwl` (macOS), one package at a time | 0.69 s | 0.75 s | 7.49 s |
+| `cp -al` or `pax -rwl`, 10 at a time | 0.19 s | 0.43 s | 2.47 s |
+| `cp` clones, one package at a time | — | 1.04 s | 4.21 s |
+| `cp` clones, 4 at a time | — | 0.58 s | 1.72 s |
+| `cp` clones, 10 at a time (the plugin's reflinks on Linux, and on macOS without FFI) | — | 0.75 s | 2.30 s |
+| `clonefile(2)` through FFI, one call per package (the plugin's reflinks on macOS) | — | — | **0.23 s** |
+
+- On macOS, one `clonefile(2)` call clones a whole package inside the kernel, about 1.6 ms per package: ten times faster than the fastest `cp`, and eleven times faster than Composer's own unzip. The plugin clones that way when PHP has FFI.
+- Hard links are slow on APFS: PHP's `link()` takes longer than copying the files.
+- On Linux, `cp -al` ten at a time hard-links 2.5 times faster than PHP's `link()` on ext4, which could speed up hard links later. On Btrfs, `cp` clones are fastest four at a time.

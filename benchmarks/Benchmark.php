@@ -223,11 +223,13 @@ final class Benchmark
         ]), "\n");
 
         $lines = [sprintf(
-            '%s %s %s, PHP %s, %s. Median of %d %s.',
+            '%s %s %s, PHP %s%s, %s. Median of %d %s.',
             php_uname('s'),
             php_uname('r'),
             php_uname('m'),
             PHP_VERSION,
+            // On macOS, FFI decides how the plugin clones: clonefile(2) with it, cp without.
+            extension_loaded('ffi') ? ' with FFI' : '',
             trim((string) $version),
             $this->runs,
             $this->runs === 1 ? 'run' : 'runs'

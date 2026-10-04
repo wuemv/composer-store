@@ -11,6 +11,7 @@ PHP still sees ordinary files inside `vendor/`: `__DIR__`, relative includes, au
 - Composer 2.0 or later. Tested with 2.0, 2.2, 2.8 and 2.10.
 - PHP 8.1 or later.
 - Linux, macOS or Windows.
+- On macOS, PHP's FFI extension, so the plugin can clone each package with one `clonefile(2)` call. Without it, the plugin runs `cp` for each package, several times slower. `php -m` lists `FFI` when you have it; PHP allows it on the command line by default.
 - The store and your projects on the same filesystem, since links cannot cross filesystems. Elsewhere, Composer installs as usual, with a warning.
 
 ## Install

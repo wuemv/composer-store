@@ -66,8 +66,14 @@ jobs:
           php-version: ${{ matrix.php }}
           coverage: none
           tools: composer:v${{ matrix.composer }}
+          # On macOS the plugin clones each package with one clonefile(2) call, through FFI.
+          extensions: ${{ matrix.os == 'macos-latest' && 'ffi' || '' }}
       - run: composer update --no-interaction --no-progress
       - run: composer --version
+      - name: Check that FFI is loaded
+        if: runner.os == 'macOS'
+        run: |
+          php -r 'exit(extension_loaded("ffi") ? 0 : 1);'
       # The runner's ext4 has no reflinks: ReflinkTest clones for real in a loop-mounted Btrfs.
       - name: Mount a Btrfs filesystem for the reflink tests
         if: matrix.reflink

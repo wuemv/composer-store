@@ -4,15 +4,17 @@ declare(strict_types=1);
 
 namespace ComposerStore\Tests\Integration;
 
+use ComposerStore\Link\CloneFile;
 use ComposerStore\Link\Cloner;
 use ComposerStore\Link\Method;
 use ComposerStore\Tests\Support\FakeCp;
 use ComposerStore\Tests\Support\Files;
 
 /**
- * Installs with reflinks. Real clones where the test directory supports them: APFS on macOS, or the
- * directory in COMPOSER_STORE_TEST_REFLINK_DIR, such as a Btrfs or XFS mount. Elsewhere on Linux, a
- * stand-in cp that copies runs the same code. Windows has no reflinks, so these tests are skipped there.
+ * Installs with reflinks. Real clones where the test directory supports them: APFS on macOS, through
+ * clonefile(2) where PHP has FFI, or the directory in COMPOSER_STORE_TEST_REFLINK_DIR, such as a Btrfs or
+ * XFS mount. Elsewhere on Linux, a stand-in cp that copies runs the same code. Windows has no reflinks, so
+ * these tests are skipped there.
  */
 final class ReflinkTest extends IntegrationTestCase
 {
@@ -52,9 +54,15 @@ final class ReflinkTest extends IntegrationTestCase
 
         $output = $this->composer($project, 'install', '-vvv');
 
-        $this->assertStringContainsString('with reflinks', $output);
-        // Each package is cloned by a cp that Composer runs alongside the others, as it runs unzip.
-        $this->assertMatchesRegularExpression("{Executing async command \\(.*\\): 'cp' .*/files' }", $output);
+        if (CloneFile::load() !== null) {
+            // macOS with FFI: one clonefile(2) call per package, inside Composer's process.
+            $this->assertStringContainsString('with reflinks, through clonefile(2)', $output);
+            $this->assertDoesNotMatchRegularExpression("{Executing async command \\(.*\\): 'cp' }", $output);
+        } else {
+            // Each package is cloned by a cp that Composer runs alongside the others, as it runs unzip.
+            $this->assertStringContainsString('with reflinks, through cp', $output);
+            $this->assertMatchesRegularExpression("{Executing async command \\(.*\\): 'cp' .*/files' }", $output);
+        }
         $this->assertSame(Method::Reflink, $this->linkMethod($project));
         $this->assertLinkedFromStore($project, 'acme/alpha', '2.0.0');
         $this->assertLinkedFromStore($project, 'acme/beta', '1.0.0');

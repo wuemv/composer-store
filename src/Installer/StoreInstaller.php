@@ -411,8 +411,15 @@ final class StoreInstaller extends LibraryInstaller
             return false;
         }
         $this->method = $choice->method;
-        $this->process = $this->method === Method::Reflink ? $this->project->getLoop()->getProcessExecutor() : null;
-        $message = sprintf('    composer-store: linking from %s with %s', $root, $this->method->describe());
+        $how = $this->method->describe();
+        $this->process = null;
+        if ($this->method === Method::Reflink) {
+            // A clonefile(2) call takes about a millisecond: only cp is worth running beside the others.
+            $inProcess = $this->linker->cloner()->clonesInProcess();
+            $this->process = $inProcess ? null : $this->project->getLoop()->getProcessExecutor();
+            $how .= $inProcess ? ', through clonefile(2)' : ', through cp';
+        }
+        $message = sprintf('    composer-store: linking from %s with %s', $root, $how);
         $this->io->writeError($message, true, IOInterface::VERBOSE);
         $this->registerProject();
 

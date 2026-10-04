@@ -5,22 +5,30 @@ declare(strict_types=1);
 namespace ComposerStore\Link;
 
 /**
- * Copies trees as copy-on-write clones (reflinks) with the system `cp`. A clone shares the original's
- * data blocks until one side changes, so it takes almost no space, yet it is an independent file:
- * editing or chmod-ing a clone in vendor/ never changes the store.
+ * Copies trees as copy-on-write clones (reflinks). A clone shares the original's data blocks until one
+ * side changes, so it takes almost no space, yet it is an independent file: editing or chmod-ing a clone
+ * in vendor/ never changes the store.
  *
  * - Linux: GNU `cp --reflink=always`, on filesystems that have reflinks (Btrfs, XFS, bcachefs, ZFS 2.2+).
- * - macOS: `cp -c` (clonefile), on APFS. It quietly copies on other filesystems, so the volume type is
- *   checked rather than trusting cp.
+ * - macOS: clonefile(2) through PHP's FFI extension, which clones a whole package in one call, on APFS.
+ *   Without FFI, `cp -c`, which quietly copies on other filesystems, so the volume type is checked
+ *   rather than trusting cp.
  * - Anything else, Windows included: no clones.
  */
 final class Cloner
 {
+    private ?CloneFile $cloneFile = null;
+
+    private bool $cloneFileLoaded = false;
+
     /**
      * @param string $os a PHP_OS_FAMILY value
+     * @param bool $inProcess whether to clone with clonefile(2) on macOS where FFI allows it, rather than cp
      */
-    public function __construct(private readonly string $os = PHP_OS_FAMILY)
-    {
+    public function __construct(
+        private readonly string $os = PHP_OS_FAMILY,
+        private readonly bool $inProcess = true,
+    ) {
     }
 
     /**
@@ -32,17 +40,39 @@ final class Cloner
     }
 
     /**
+     * Whether cloneTree() clones inside this process, with one clonefile(2) call, rather than running cp.
+     * A package then takes about a millisecond, so there is nothing to gain from cloning in parallel.
+     */
+    public function clonesInProcess(): bool
+    {
+        return $this->cloneFile() !== null;
+    }
+
+    /**
      * Whether files in $dir can be cloned within its filesystem. Clones a small file in $dir to find out.
      */
     public function isSupported(string $dir): bool
     {
-        if ($this->os === 'Darwin') {
+        $cloneFile = $this->cloneFile();
+        if ($cloneFile !== null) {
+            // Unlike cp -c, clonefile(2) fails where the volume cannot clone.
+            $clone = static function (string $from, string $to) use ($cloneFile): bool {
+                try {
+                    $cloneFile->clone($from, $to);
+                } catch (LinkException) {
+                    return false;
+                }
+
+                return true;
+            };
+        } elseif ($this->os === 'Darwin') {
             if ($this->macVolumeType($dir) !== 'apfs') {
                 return false;
             }
-            $command = ['cp', '-c'];
+            $clone = fn (string $from, string $to): bool => $this->run(['cp', '-c', '--', $from, $to])[0] === 0;
         } elseif ($this->os === 'Linux') {
-            $command = ['cp', '--reflink=always'];
+            $clone = fn (string $from, string $to): bool
+                => $this->run(['cp', '--reflink=always', '--', $from, $to])[0] === 0;
         } else {
             return false;
         }
@@ -52,7 +82,7 @@ final class Cloner
             return false;
         }
         try {
-            return $this->run([...$command, '--', $probe, $probe . '.clone'])[0] === 0;
+            return $clone($probe, $probe . '.clone');
         } finally {
             @unlink($probe);
             @unlink($probe . '.clone');
@@ -66,6 +96,12 @@ final class Cloner
      */
     public function cloneTree(string $source, string $target): void
     {
+        $cloneFile = $this->cloneFile();
+        if ($cloneFile !== null) {
+            $cloneFile->clone($source, $target);
+
+            return;
+        }
         [$status, , $error] = $this->run($this->treeCommand($source, $target));
         if ($status !== 0) {
             throw new LinkException(sprintf('cannot clone %s to %s: %s', $source, $target, $error));
@@ -73,7 +109,8 @@ final class Cloner
     }
 
     /**
-     * The cp command cloneTree() runs, for callers that run it themselves, several at once.
+     * The cp command cloneTree() runs without clonefile(2), for callers that run it themselves, several
+     * at once.
      *
      * @return list<string>
      *
@@ -86,6 +123,16 @@ final class Cloner
             'Darwin' => ['cp', '-c', '-R', '-p', '--', $source, $target],
             default => throw new LinkException('reflinks are not supported on ' . $this->os),
         };
+    }
+
+    private function cloneFile(): ?CloneFile
+    {
+        if (!$this->cloneFileLoaded) {
+            $this->cloneFileLoaded = true;
+            $this->cloneFile = $this->os === 'Darwin' && $this->inProcess ? CloneFile::load() : null;
+        }
+
+        return $this->cloneFile;
     }
 
     /**

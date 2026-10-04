@@ -27,6 +27,7 @@ jobs:
           php-version: '8.4'
           coverage: none
           tools: composer:v2
+          extensions: ffi
       - name: Mount a Btrfs filesystem
         if: matrix.btrfs
         run: |
