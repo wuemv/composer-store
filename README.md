@@ -11,7 +11,7 @@ PHP still sees ordinary files inside `vendor/`: `__DIR__`, relative includes, au
 - Composer 2.0 or later. Tested with 2.0, 2.2, 2.8 and 2.10.
 - PHP 8.1 or later.
 - Linux, macOS or Windows.
-- On macOS, PHP's FFI extension, so the plugin can clone each package with one `clonefile(2)` call. Without it, the plugin runs `cp` for each package, and installs from a warm store took about 50% longer than without the plugin instead of 10 to 15%. `php -m` lists `FFI` when you have it; PHP allows it on the command line by default.
+- On macOS, PHP's FFI extension, so the plugin can clone each package with one `clonefile(2)` call. Without it, the plugin runs `cp` for each package, and installs from a warm store took about 50% longer than without the plugin, where with it they take from 10% less to 15% more. `php -m` lists `FFI` when you have it; PHP allows it on the command line by default.
 - The store and your projects on the same filesystem, since links cannot cross filesystems. Elsewhere, Composer installs as usual, with a warning.
 
 ## Install
@@ -157,14 +157,14 @@ Then delete the store, `$COMPOSER_HOME/store` or your `COMPOSER_STORE_DIR`. Dele
 - The store must be on the same filesystem as `vendor/`. On Btrfs, subvolumes count as separate filesystems. In a container, a project in a bind mount is on another filesystem than the container's Composer home: point `COMPOSER_STORE_DIR` at a directory on the project's filesystem.
 - Windows has hard links only: Dev Drive and ReFS block cloning are not used. `read-only` is ignored on Windows, where a read-only file cannot be deleted.
 - Filesystems limit the links to one file (65,000 on ext4, 1,023 on NTFS). Past that, the package is copied, with a warning.
-- Installs are not always faster than without the plugin. On macOS, installs from a warm store take 10 to 15% longer: generating an optimized autoloader reads every class file, and a cloned file is read from disk the first time, where a freshly unzipped one is still in memory. On Linux with hard links they ranged from 22% faster to 14% slower, depending on the machine: Composer unzips several archives at once, so it gains more from more CPUs than the plugin, which links file by file. See the benchmarks.
+- Installs are not always faster than without the plugin. From a warm store, they took from 17% less to 11% more time on Linux, depending on the machine and filesystem: where creating files is cheap, as on ext4, and CPUs are many, Composer's own extraction is about as fast as linking. On macOS they took from 10% less to 15% more: generating an optimized autoloader reads every class file, and a cloned file is read from disk the first time, where a freshly unzipped one is still in memory. See the benchmarks.
 - `store:prune` keeps a version while any registered project lists it, including projects that no longer use the plugin, until their directory is deleted.
 - Composer's own cache still holds the downloaded archives: `composer clear-cache` frees it.
 - One store shared by several users of a machine is not supported.
 
 ## Benchmarks
 
-Five Laravel projects (Laravel 11, 12 and 13, two with extra packages) install 556 packages, 148 different ones. With the plugin they take about half to two thirds less disk space, store included. Installing them from a warm store takes 10 to 15% longer than without the plugin on macOS, where the plugin clones each package with one `clonefile(2)` call, and on Linux from 22% less to 14% more time, depending on the machine.
+Five Laravel projects (Laravel 11, 12 and 13, two with extra packages) install 556 packages, 148 different ones. With the plugin they take about half to two thirds less disk space, store included. Installing them from a warm store takes from 17% less to 11% more time than without the plugin on Linux, depending on the machine and filesystem, and from 10% less to 15% more on macOS.
 
 [benchmarks/RESULTS.md](benchmarks/RESULTS.md) has the numbers for Linux (ext4 and Btrfs) and macOS, and [benchmarks/](benchmarks/) explains how to run the benchmark.
 
