@@ -53,7 +53,7 @@ jobs:
       - run: vendor/bin/phpunit
 
   laravel:
-    name: Fresh Laravel app (network)
+    name: Network tests (Laravel app, composer-patches)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
