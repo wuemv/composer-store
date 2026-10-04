@@ -42,14 +42,14 @@ final class CommandsTest extends IntegrationTestCase
         $this->assertSame('auto', $project['mode']);
         $this->assertTrue($project['links']);
 
-        $text = $this->storeCommand($first, 'store:status')->stdout;
+        $text = self::text($this->storeCommand($first, 'store:status'));
         $this->assertMatchesRegularExpression('{^Packages: +2 packages, 2 versions$}m', $text);
         $this->assertMatchesRegularExpression('{^Projects: +2 projects registered$}m', $text);
         $this->assertMatchesRegularExpression('{^This project: +links from the store$}m', $text);
 
         // Outside of a project, it only describes the store.
         Files::makeDir($this->work . '/elsewhere');
-        $text = $this->storeCommand($this->work . '/elsewhere', 'store:status')->stdout;
+        $text = self::text($this->storeCommand($this->work . '/elsewhere', 'store:status'));
         $this->assertMatchesRegularExpression('{^Store: +\S+$}m', $text);
         $this->assertStringNotContainsString('This project', $text);
     }
@@ -250,6 +250,14 @@ final class CommandsTest extends IntegrationTestCase
     private function storeCommand(string $dir, string $command, string ...$args): ProcessResult
     {
         return $this->runComposer($dir, [$command, ...array_values($args)]);
+    }
+
+    /**
+     * Stdout with \n line endings, for patterns anchored at line ends: Windows ends lines with \r\n.
+     */
+    private static function text(ProcessResult $result): string
+    {
+        return str_replace("\r\n", "\n", $result->stdout);
     }
 
     /**

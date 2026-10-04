@@ -119,6 +119,7 @@ final class LaravelTest extends TestCase
         $result = $this->env->composer->run($cwd, array_values($args), $env, network: true);
         $this->assertSame(0, $result->exitCode, $result->describe());
 
-        return $result->output();
+        // Windows ends lines with \r\n.
+        return str_replace("\r\n", "\n", $result->output());
     }
 }
