@@ -154,6 +154,12 @@ As built:
 - README: install (`composer global require`), `allow-plugins` line, config, uninstall steps, limitations.
 - Benchmarks in `benchmarks/`: disk usage and install time across 5 Laravel projects, with and without the plugin.
 
+As built:
+
+- `README.md` covers install (Packagist, and from GitHub until it is published there), settings, commands, uninstall and limitations. `.gitattributes` keeps everything but `src/`, `composer.json` and the README out of the dist archives.
+- `benchmarks/run.php` (with `Benchmark.php`) installs the five projects in `benchmarks/projects/`, whose `composer.json` and `composer.lock` pin every package: offline from a warm Composer cache, `--no-scripts`, with and without `--no-autoloader`, without the plugin and per mode from an empty and a warm store. Disk space is the drop in free space, which counts reflinks right where `du` cannot. `benchmarks/README.md` explains the method, `benchmarks/RESULTS.md` has the numbers.
+- The Benchmarks workflow runs it on ext4, Btrfs and APFS when `benchmarks/` changes, with the results in the job summaries. PHPCS and PHPStan cover `benchmarks/` too.
+
 ## Testing
 
 Use PHPUnit. Integration tests run real `composer` commands against fixture projects in a temp dir.

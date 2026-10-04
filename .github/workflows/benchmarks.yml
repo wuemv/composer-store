@@ -1,0 +1,47 @@
+name: Benchmarks
+
+# Runs when the benchmarks change. The results are in each job's summary; benchmarks/RESULTS.md
+# collects them.
+on:
+  push:
+    paths:
+      - 'benchmarks/**'
+      - '.github/workflows/benchmarks.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: 'Linux, ext4 (hard links)', os: ubuntu-latest, modes: '--mode=auto' }
+          - { name: 'Linux, Btrfs (reflinks)', os: ubuntu-latest, btrfs: true, modes: '--mode=auto --mode=hardlink' }
+          - { name: 'macOS, APFS (reflinks)', os: macos-latest, modes: '--mode=auto --mode=hardlink' }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          coverage: none
+          tools: composer:v2
+      - name: Mount a Btrfs filesystem
+        if: matrix.btrfs
+        run: |
+          sudo apt-get install -y -q btrfs-progs
+          truncate -s 4G "$RUNNER_TEMP/btrfs.img"
+          mkfs.btrfs -q "$RUNNER_TEMP/btrfs.img"
+          sudo mkdir -p /mnt/btrfs
+          sudo mount -o loop "$RUNNER_TEMP/btrfs.img" /mnt/btrfs
+          sudo chown "$(id -u):$(id -g)" /mnt/btrfs
+          echo "BENCHMARK_DIR=/mnt/btrfs/benchmark" >> "$GITHUB_ENV"
+      - name: Run the benchmark
+        run: |
+          php benchmarks/run.php --work="${BENCHMARK_DIR:-$RUNNER_TEMP/benchmark}" --runs=3 ${{ matrix.modes }} \
+            | tee "$RUNNER_TEMP/results.md"
+          { echo "### ${{ matrix.name }}"; echo; cat "$RUNNER_TEMP/results.md"; } >> "$GITHUB_STEP_SUMMARY"
