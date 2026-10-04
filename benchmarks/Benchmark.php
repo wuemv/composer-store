@@ -263,22 +263,27 @@ final class Benchmark
             );
         }
 
-        $vendors = $stores = $totals = [];
-        foreach (array_keys($names) as $mode) {
-            $used = (int) self::median($this->disk[$mode === 'plain' ? 'plain' : 'empty-' . $mode]);
-            $store = $mode === 'plain' ? 0 : (int) self::median($this->stores[$mode]);
-            $vendors[] = self::size($used - $store);
-            $stores[] = $mode === 'plain' ? '–' : self::size($store);
-            $totals[] = '**' . self::size($used) . '**';
+        // The store's du cannot be subtracted from the free-space drop: filesystems such as Btrfs keep
+        // small files inline, where du counts whole blocks.
+        $plain = (int) self::median($this->disk['plain']);
+        $cells = [self::size($plain)];
+        $storeSizes = [];
+        foreach ($this->modes as $mode) {
+            $used = (int) self::median($this->disk['empty-' . $mode]);
+            $saved = $plain > 0 ? 100 * ($plain - $used) / $plain : 0;
+            $cells[] = sprintf('%s (−%.0f%%)', self::size($used), $saved);
+            $store = (int) self::median($this->stores[$mode]);
+            $storeSizes[] = sprintf('%s with %s', self::size($store), lcfirst($names[$mode]));
         }
         array_push(
             $lines,
             '',
             '| Disk space | ' . implode(' | ', $names) . ' |',
             '|---|' . str_repeat('---:|', count($names)),
-            sprintf('| %d × vendor/ | %s |', count($this->projects), implode(' | ', $vendors)),
-            '| Store | ' . implode(' | ', $stores) . ' |',
-            '| **Total** | ' . implode(' | ', $totals) . ' |',
+            sprintf('| %d projects | %s |', count($this->projects), implode(' | ', $cells)),
+            '',
+            'Disk space is the drop in free space while installing all projects into an empty store, so it includes '
+                . 'the store. The store alone, per du: ' . implode(', ', $storeSizes) . '.',
         );
 
         return implode("\n", $lines) . "\n";

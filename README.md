@@ -156,14 +156,16 @@ Then delete the store, `$COMPOSER_HOME/store` or your `COMPOSER_STORE_DIR`. Dele
 - The store must be on the same filesystem as `vendor/`. On Btrfs, subvolumes count as separate filesystems. In a container, a project in a bind mount is on another filesystem than the container's Composer home: point `COMPOSER_STORE_DIR` at a directory on the project's filesystem.
 - Windows has hard links only: Dev Drive and ReFS block cloning are not used. `read-only` is ignored on Windows, where a read-only file cannot be deleted.
 - Filesystems limit the links to one file (65,000 on ext4, 1,023 on NTFS). Past that, the package is copied, with a warning.
-- With reflinks, `cp` runs once per package.
+- With reflinks, `cp` runs once per package, and the plugin links or clones one package after the other where Composer extracts several at once. On macOS, installs currently take about twice as long as without the plugin, and with reflinks on Linux they are no faster: see the benchmarks.
 - `store:prune` keeps a version while any registered project lists it, including projects that no longer use the plugin, until their directory is deleted.
 - Composer's own cache still holds the downloaded archives: `composer clear-cache` frees it.
 - One store shared by several users of a machine is not supported.
 
 ## Benchmarks
 
-Five Laravel projects (Laravel 11, 12 and 13, two with extra packages) install 556 packages, 148 different ones. [benchmarks/](benchmarks/) measures their install times and disk space with and without the plugin, and explains how to run it.
+Five Laravel projects (Laravel 11, 12 and 13, two with extra packages) install 556 packages, 148 different ones. With the plugin they take 49 to 66% less disk space, store included. On Linux with hard links, installing from a warm store is 14 to 22% faster than without the plugin. With reflinks on Linux it is about as fast as without the plugin, and on macOS it is about twice as slow, with reflinks or hard links.
+
+[benchmarks/RESULTS.md](benchmarks/RESULTS.md) has the numbers for Linux (ext4 and Btrfs) and macOS, and [benchmarks/](benchmarks/) explains how to run the benchmark.
 
 ## Development
 

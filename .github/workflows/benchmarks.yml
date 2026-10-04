@@ -1,11 +1,12 @@
 name: Benchmarks
 
-# Runs when the benchmarks change. The results are in each job's summary; benchmarks/RESULTS.md
-# collects them.
+# Runs when the benchmark or its projects change. The results are in each job's summary;
+# benchmarks/RESULTS.md collects them.
 on:
   push:
     paths:
-      - 'benchmarks/**'
+      - 'benchmarks/*.php'
+      - 'benchmarks/projects/**'
       - '.github/workflows/benchmarks.yml'
   workflow_dispatch:
 

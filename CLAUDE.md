@@ -158,7 +158,8 @@ As built:
 
 - `README.md` covers install (Packagist, and from GitHub until it is published there), settings, commands, uninstall and limitations. `.gitattributes` keeps everything but `src/`, `composer.json` and the README out of the dist archives.
 - `benchmarks/run.php` (with `Benchmark.php`) installs the five projects in `benchmarks/projects/`, whose `composer.json` and `composer.lock` pin every package: offline from a warm Composer cache, `--no-scripts`, with and without `--no-autoloader`, without the plugin and per mode from an empty and a warm store. Disk space is the drop in free space, which counts reflinks right where `du` cannot. `benchmarks/README.md` explains the method, `benchmarks/RESULTS.md` has the numbers.
-- The Benchmarks workflow runs it on ext4, Btrfs and APFS when `benchmarks/` changes, with the results in the job summaries. PHPCS and PHPStan cover `benchmarks/` too.
+- The Benchmarks workflow runs it on ext4, Btrfs and APFS when the benchmark or its projects change, with the results in the job summaries. PHPCS and PHPStan cover `benchmarks/` too.
+- Results so far: 49 to 66% less disk space everywhere. Installs from a warm store are 14 to 22% faster with hard links on Linux, about even with reflinks on Linux (one `cp` per package), and about twice as slow on macOS with either method: the plugin links package after package in one process while Composer extracts in parallel, and per-file work is slow on APFS. Parallel linking or one `clonefile(2)` per package are the candidates to fix it.
 
 ## Testing
 
