@@ -42,11 +42,14 @@ Store layout:
 ```
 $COMPOSER_STORE_DIR (default: $COMPOSER_HOME/store)
   packages/<vendor>/<name>/<version>-<reference-short>/
-    ...package files...
-    .store-meta.json        # tree hash, created_at, source dist url
+    files/                  # the package exactly as Composer extracts it; this is what gets linked
+    .store-meta.json        # name, version, full reference, tree hash, created_at, source dist url
+  tmp/                      # entries are built here, then renamed into packages/ in one step
   projects.json             # absolute paths of projects using the store
   .lock
 ```
+
+`<reference-short>` is the first 12 characters of a commit hash, or a hash of the reference when it is not one. The full reference is in `.store-meta.json` and is checked before an entry is used. Package files live in `files/` so the metadata never mixes with them and an entry appears with a single `rename()`.
 
 Implementation outline:
 
@@ -55,6 +58,7 @@ Implementation outline:
 - Register a custom installer extending `Composer\Installer\LibraryInstaller` that handles the `library` package type only. Other types (composer-plugin, metapackage, custom installer types from `composer/installers`) are left to their existing installers.
 - Override the install / update / remove code steps. In Composer 2 these return promises, so stay async-compatible.
 - Remove = delete `vendor/<pkg>` only. Never delete from the store during a project operation.
+- Files listed in a package's `bin` are copied, not linked: Composer chmods them in place on install and update, which through a hard link would change the store's copy for every project.
 
 Packages that must be **copied, not linked** (skip rules):
 
@@ -139,6 +143,14 @@ Must cover:
 - Uninstall plugin + `composer install` → normal `vendor/`.
 
 CI (GitHub Actions): Ubuntu + macOS + Windows, PHP 8.1 to latest, at least two Composer 2.x minor versions.
+
+## Development
+
+- `composer test` runs the unit and integration suites (no network). `composer test:network` runs the fresh-Laravel-app test, which needs Packagist and GitHub. `composer lint` runs PHPCS (PSR-12) and PHPStan (max level).
+- Integration tests use the `composer` on the PATH, or `COMPOSER_STORE_TEST_COMPOSER=/path/to/composer`. They build a local git-backed fixture repository from `tests/Fixtures/packages/` and install the plugin globally into a throwaway Composer home.
+- Set `COMPOSER_STORE_TEST_KEEP=1` to keep the test temp dirs. `COMPOSER_STORE_TEST_OTHER_FS` points the cross-filesystem tests at a directory on another filesystem (default `/dev/shm`).
+- Running Composer as root needs `COMPOSER_ALLOW_SUPERUSER=1`, otherwise plugins are disabled.
+- In sandboxes that block GitHub's archive downloads but allow `git`, install `tools/github-dist-shim` globally (see its README).
 
 ## Conventions
 

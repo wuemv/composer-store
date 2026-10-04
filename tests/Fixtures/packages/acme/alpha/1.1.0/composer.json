@@ -1,0 +1,10 @@
+{
+    "name": "acme/alpha",
+    "description": "Fixture library with several versions.",
+    "type": "library",
+    "autoload": {
+        "psr-4": {
+            "Acme\\Alpha\\": "src/"
+        }
+    }
+}

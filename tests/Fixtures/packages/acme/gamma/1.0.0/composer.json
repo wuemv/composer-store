@@ -1,0 +1,10 @@
+{
+    "name": "acme/gamma",
+    "description": "Fixture library added later with composer require.",
+    "type": "library",
+    "autoload": {
+        "psr-4": {
+            "Acme\\Gamma\\": "src/"
+        }
+    }
+}

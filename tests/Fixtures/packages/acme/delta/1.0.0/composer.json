@@ -1,0 +1,10 @@
+{
+    "name": "acme/delta",
+    "description": "Fixture dependency that is not of type library.",
+    "type": "project",
+    "autoload": {
+        "psr-4": {
+            "Acme\\Delta\\": "src/"
+        }
+    }
+}
