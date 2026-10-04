@@ -33,6 +33,14 @@ final class ComposerRunner
     }
 
     /**
+     * The Composer script or binary that runs, e.g. for install.php's --composer.
+     */
+    public function binary(): string
+    {
+        return $this->command[count($this->command) - 1];
+    }
+
+    /**
      * Runs Composer with a clean environment: no COMPOSER* variable from the outside leaks in, and
      * unless $network is set, no proxy settings either (fixture tests only read local files).
      *

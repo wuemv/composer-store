@@ -4,6 +4,7 @@ parameters:
         - src
         - tests
         - benchmarks
+        - install.php
     excludePaths:
         - tests/Fixtures
     stubFiles:

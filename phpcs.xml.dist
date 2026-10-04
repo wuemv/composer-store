@@ -8,6 +8,7 @@
     <file>src</file>
     <file>tests</file>
     <file>benchmarks</file>
+    <file>install.php</file>
     <exclude-pattern>tests/Fixtures/*</exclude-pattern>
 
     <rule ref="PSR12"/>

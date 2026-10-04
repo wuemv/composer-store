@@ -16,21 +16,30 @@ PHP still sees ordinary files inside `vendor/`: `__DIR__`, relative includes, au
 
 ## Install
 
-Install it globally, so it works in every project without being added to them:
+Install it globally, so it works in every project without being added to them. The install script runs the commands below, then checks that Composer loads the plugin:
 
 ```sh
-# Composer 2.2+ asks before running a new plugin: allow this one first.
-composer global config allow-plugins.wuemv/composer-store true
-composer global require wuemv/composer-store
+curl -fsSL https://raw.githubusercontent.com/wuemv/composer-store/HEAD/install.php | php
 ```
 
-The package is not on Packagist yet. Until it is, install it from GitHub:
+On Windows, in PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/wuemv/composer-store/HEAD/install.php | php
+```
+
+Add `-- --dry-run` after `php` to see the commands without running them. In a clone, `php install.php --help` lists the other options: where to install from, and which Composer to run.
+
+Or run the commands yourself. The package is not on Packagist yet, so they install it from GitHub:
 
 ```sh
 composer global config repositories.composer-store vcs https://github.com/wuemv/composer-store
+# Composer 2.2+ asks before running a new plugin: allow this one first.
 composer global config allow-plugins.wuemv/composer-store true
 composer global require wuemv/composer-store:@dev
 ```
+
+Once it is on Packagist, `composer global require wuemv/composer-store` after the `allow-plugins` line will do, or `--from=packagist` for the script.
 
 From then on, `composer install`, `update`, `require` and `remove` go through the store:
 

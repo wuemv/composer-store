@@ -4,6 +4,8 @@
 /spike              export-ignore
 /tests              export-ignore
 /tools              export-ignore
+/phpstan            export-ignore
+/install.php        export-ignore
 /.gitattributes     export-ignore
 /.gitignore         export-ignore
 /CLAUDE.md          export-ignore
