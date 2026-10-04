@@ -92,7 +92,7 @@ final class InstallTest extends IntegrationTestCase
         }
 
         $result = Process::run([PHP_BINARY, 'vendor/bin/beta'], $project, Process::environmentWithoutComposer());
-        $this->assertSame("beta runs with alpha 2.0.0\n", $result->stdout, $result->describe());
+        $this->assertSame('beta runs with alpha 2.0.0' . PHP_EOL, $result->stdout, $result->describe());
     }
 
     public function testPackagesThatAreNotLibrariesAreLeftToComposer(): void
