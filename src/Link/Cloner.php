@@ -69,10 +69,11 @@ final class Cloner
             if ($this->macVolumeType($dir) !== 'apfs') {
                 return false;
             }
-            $clone = fn (string $from, string $to): bool => $this->run(['cp', '-c', '--', $from, $to])[0] === 0;
+            $clone = static fn (string $from, string $to): bool
+                => Command::run(['cp', '-c', '--', $from, $to])[0] === 0;
         } elseif ($this->os === 'Linux') {
-            $clone = fn (string $from, string $to): bool
-                => $this->run(['cp', '--reflink=always', '--', $from, $to])[0] === 0;
+            $clone = static fn (string $from, string $to): bool
+                => Command::run(['cp', '--reflink=always', '--', $from, $to])[0] === 0;
         } else {
             return false;
         }
@@ -102,7 +103,7 @@ final class Cloner
 
             return;
         }
-        [$status, , $error] = $this->run($this->treeCommand($source, $target));
+        [$status, , $error] = Command::run($this->treeCommand($source, $target));
         if ($status !== 0) {
             throw new LinkException(sprintf('cannot clone %s to %s: %s', $source, $target, $error));
         }
@@ -142,7 +143,7 @@ final class Cloner
     private function macVolumeType(string $dir): ?string
     {
         $path = realpath($dir);
-        [$status, $mounts] = $this->run(['mount'], captureOutput: true);
+        [$status, $mounts] = Command::run(['mount'], captureOutput: true);
         if ($path === false || $status !== 0) {
             return null;
         }
@@ -163,40 +164,5 @@ final class Cloner
         }
 
         return $type;
-    }
-
-    /**
-     * Runs a command without a shell.
-     *
-     * @param list<string> $command
-     *
-     * @return array{int, string, string} exit status, output when captured, first line of the errors
-     */
-    private function run(array $command, bool $captureOutput = false): array
-    {
-        $descriptors = [
-            0 => ['file', '/dev/null', 'r'],
-            1 => $captureOutput ? ['pipe', 'w'] : ['file', '/dev/null', 'w'],
-            // Errors only when output is not captured: reading two pipes one after the other could block.
-            2 => $captureOutput ? ['file', '/dev/null', 'w'] : ['pipe', 'w'],
-        ];
-        $process = @proc_open($command, $descriptors, $pipes);
-        if (!is_resource($process)) {
-            return [-1, '', 'cannot run ' . $command[0]];
-        }
-        $stream = $pipes[$captureOutput ? 1 : 2];
-        $text = (string) stream_get_contents($stream);
-        fclose($stream);
-        $status = proc_close($process);
-
-        if ($captureOutput) {
-            return [$status, $text, ''];
-        }
-        $error = trim(strtok($text, "\n") ?: '');
-        if ($error === '') {
-            $error = $status === 127 ? $command[0] . ' not found' : 'exit status ' . $status;
-        }
-
-        return [$status, '', $error];
     }
 }

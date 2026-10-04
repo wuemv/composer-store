@@ -14,17 +14,26 @@ use function React\Promise\reject;
  * hard link to the store or a copy-on-write clone of it. Never symlinks: PHP resolves symlinks in
  * __DIR__, which would point packages at the store instead of the project.
  *
- * The tree is built next to its target and renamed into place, so a target is never half-built.
+ * Trees are built in PHP, or by one cp per package (linkAsync(), reflinkAsync()) that the caller runs
+ * beside others. Either way, a tree is built next to its target and renamed into place, so a target is
+ * never half-built.
  */
 final class Linker
 {
-    public function __construct(private readonly Cloner $cloner = new Cloner())
-    {
+    public function __construct(
+        private readonly Cloner $cloner = new Cloner(),
+        private readonly HardLinker $hardLinker = new HardLinker(),
+    ) {
     }
 
     public function cloner(): Cloner
     {
         return $this->cloner;
+    }
+
+    public function hardLinker(): HardLinker
+    {
+        return $this->hardLinker;
     }
 
     /**
@@ -52,6 +61,44 @@ final class Linker
     }
 
     /**
+     * Same as link(), but leaves hard-linking the tree to one cp, which $run runs, so that several
+     * packages can be linked at once: $run gets the command and returns a promise that rejects when the
+     * command fails. The paths in $copyPaths are then replaced by copies.
+     *
+     * @param array<string> $copyPaths
+     * @param callable(list<string>): PromiseInterface<mixed> $run
+     *
+     * @return PromiseInterface<null> rejected with a LinkException when the tree cannot be linked;
+     *                                nothing is left at $target then
+     */
+    public function linkAsync(string $source, string $target, array $copyPaths, callable $run): PromiseInterface
+    {
+        return $this->placeAsync(
+            $target,
+            $run,
+            fn (string $temp): array => $this->hardLinker->treeCommand($source, $temp),
+            static function (string $temp) use ($source, $copyPaths): void {
+                foreach ($copyPaths as $path) {
+                    $relative = self::normalizePath($path);
+                    // link() only ever copies files inside the package.
+                    if ($relative === '' || in_array('..', explode('/', $relative), true)) {
+                        continue;
+                    }
+                    $file = $temp . '/' . $relative;
+                    if (is_link($file) || !is_file($file)) {
+                        continue;
+                    }
+                    if (!@unlink($file)) {
+                        $error = self::lastError();
+                        throw new \RuntimeException(sprintf('Cannot replace %s with a copy: %s', $file, $error));
+                    }
+                    self::copyFile($source . '/' . $relative, $file);
+                }
+            }
+        );
+    }
+
+    /**
      * Same as link(), but every file is a copy-on-write clone: it shares the store's data blocks, yet
      * is a file of its own, so nothing done to it in vendor/ reaches the store. That includes the
      * chmod of package binaries, so they are cloned too.
@@ -76,26 +123,10 @@ final class Linker
      */
     public function reflinkAsync(string $source, string $target, callable $run): PromiseInterface
     {
-        $temp = $this->startPlacing($target);
-        try {
-            $cloning = $run($this->cloner->treeCommand($source, $temp));
-        } catch (\Throwable $e) {
-            Store::removeTree($temp);
-
-            return reject($e);
-        }
-
-        return $cloning->then(
-            function () use ($temp, $target) {
-                $this->finishPlacing($temp, $target);
-
-                return null;
-            },
-            static function (\Throwable $e) use ($temp): void {
-                Store::removeTree($temp);
-
-                throw $e;
-            }
+        return $this->placeAsync(
+            $target,
+            $run,
+            fn (string $temp): array => $this->cloner->treeCommand($source, $temp)
         );
     }
 
@@ -126,6 +157,54 @@ final class Linker
             throw $e;
         }
         $this->finishPlacing($temp, $target);
+    }
+
+    /**
+     * Has $run run the command that creates the tree in a temp dir next to $target, lets $finish
+     * complete it, then renames it into place.
+     *
+     * @param callable(list<string>): PromiseInterface<mixed> $run
+     * @param callable(string): list<string> $command the command that creates the given path
+     * @param (callable(string): void)|null $finish
+     *
+     * @return PromiseInterface<null>
+     */
+    private function placeAsync(
+        string $target,
+        callable $run,
+        callable $command,
+        ?callable $finish = null,
+    ): PromiseInterface {
+        $temp = $this->startPlacing($target);
+        try {
+            $running = $run($command($temp));
+        } catch (\Throwable $e) {
+            Store::removeTree($temp);
+
+            return reject($e);
+        }
+
+        return $running->then(
+            function () use ($temp, $target, $finish) {
+                try {
+                    if ($finish !== null) {
+                        $finish($temp);
+                    }
+                } catch (\Throwable $e) {
+                    Store::removeTree($temp);
+
+                    throw $e;
+                }
+                $this->finishPlacing($temp, $target);
+
+                return null;
+            },
+            static function (\Throwable $e) use ($temp): void {
+                Store::removeTree($temp);
+
+                throw $e;
+            }
+        );
     }
 
     /**

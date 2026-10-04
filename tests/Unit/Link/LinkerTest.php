@@ -5,12 +5,17 @@ declare(strict_types=1);
 namespace ComposerStore\Tests\Unit\Link;
 
 use ComposerStore\Link\Cloner;
+use ComposerStore\Link\Command;
 use ComposerStore\Link\LinkException;
 use ComposerStore\Link\Linker;
 use ComposerStore\Tests\Support\FakeCp;
 use ComposerStore\Tests\Support\Files;
 use PHPUnit\Framework\Attributes\RequiresOperatingSystem;
 use PHPUnit\Framework\TestCase;
+use React\Promise\PromiseInterface;
+
+use function React\Promise\reject;
+use function React\Promise\resolve;
 
 final class LinkerTest extends TestCase
 {
@@ -122,6 +127,66 @@ final class LinkerTest extends TestCase
         }
     }
 
+    #[RequiresOperatingSystem('Linux')]
+    public function testLinkAsyncHardLinksTheTreeWithOneCpThenCopiesTheCopyPaths(): void
+    {
+        chmod($this->source . '/bin/tool', 0755);
+        symlink('src/Foo.php', $this->source . '/foo-link');
+        // A path that leaves the package is never touched.
+        Files::makeDir(dirname($this->target));
+        file_put_contents(dirname($this->target) . '/outside', 'outside');
+        $outside = fileinode(dirname($this->target) . '/outside');
+        $commands = [];
+
+        $error = $this->settle((new Linker())->linkAsync(
+            $this->source,
+            $this->target,
+            ['./bin//tool', '../outside', 'missing'],
+            static function (array $command) use (&$commands): PromiseInterface {
+                $commands[] = $command;
+
+                return self::runAtOnce($command);
+            }
+        ));
+
+        $this->assertNull($error);
+        $this->assertCount(1, $commands, 'one cp for the whole tree');
+        $this->assertSame(['cp', '-R', '-l', '-P', '--', $this->source], array_slice($commands[0], 0, 6));
+        $this->assertSame(array_keys(Files::entries($this->source)), array_keys(Files::entries($this->target)));
+        foreach (['README.md', 'src/Foo.php', 'src/Deep/Bar.php'] as $file) {
+            $this->assertSame(fileinode($this->source . '/' . $file), fileinode($this->target . '/' . $file), $file);
+        }
+        $copy = $this->target . '/bin/tool';
+        $this->assertNotSame(fileinode($this->source . '/bin/tool'), fileinode($copy));
+        $this->assertFileEquals($this->source . '/bin/tool', $copy);
+        $this->assertSame(0755, fileperms($copy) & 0777);
+        $this->assertTrue(is_link($this->target . '/foo-link'));
+        $this->assertSame('src/Foo.php', readlink($this->target . '/foo-link'));
+        $this->assertDirectoryExists($this->target . '/empty');
+        $this->assertSame($outside, fileinode(dirname($this->target) . '/outside'));
+        $this->assertSame([], glob(dirname($this->target) . '/.*composer-store*') ?: []);
+    }
+
+    #[RequiresOperatingSystem('Linux')]
+    public function testLinkAsyncLeavesNothingBehindWhenCpFails(): void
+    {
+        // The cp gets part of the way, or all of it, before failing.
+        $error = $this->settle((new Linker())->linkAsync(
+            $this->source,
+            $this->target,
+            [],
+            static function (array $command): PromiseInterface {
+                self::runAtOnce($command);
+
+                return reject(new LinkException('cp failed'));
+            }
+        ));
+
+        $this->assertInstanceOf(LinkException::class, $error);
+        $this->assertFileDoesNotExist($this->target);
+        $this->assertSame([], glob(dirname($this->target) . '/.*composer-store*') ?: []);
+    }
+
     public function testCopyGivesEveryFileItsOwnCopy(): void
     {
         chmod($this->source . '/bin/tool', 0755);
@@ -167,5 +232,34 @@ final class LinkerTest extends TestCase
 
         $this->assertFileDoesNotExist($this->target);
         $this->assertSame([], glob(dirname($this->target) . '/.*composer-store*') ?: []);
+    }
+
+    /**
+     * Runs a command at once, where Composer would run it in the background.
+     *
+     * @param list<string> $command
+     *
+     * @return PromiseInterface<mixed>
+     */
+    private static function runAtOnce(array $command): PromiseInterface
+    {
+        [$status, , $error] = Command::run($command);
+
+        return $status === 0 ? resolve(null) : reject(new LinkException($error));
+    }
+
+    /**
+     * @param PromiseInterface<mixed> $promise settled already, as the commands ran at once
+     *
+     * @return \Throwable|null why it was rejected
+     */
+    private function settle(PromiseInterface $promise): ?\Throwable
+    {
+        $error = null;
+        $promise->then(null, static function (\Throwable $e) use (&$error): void {
+            $error = $e;
+        });
+
+        return $error;
     }
 }

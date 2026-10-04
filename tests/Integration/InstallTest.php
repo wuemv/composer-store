@@ -98,6 +98,24 @@ final class InstallTest extends IntegrationTestCase
         $this->assertSame('beta runs with alpha 2.0.0' . PHP_EOL, $result->stdout, $result->describe());
     }
 
+    public function testOnLinuxEachPackageIsHardLinkedByOneCp(): void
+    {
+        $project = $this->createProject('app', ['acme/beta' => '1.0.0']);
+
+        $output = $this->composer($project, 'install', '-vvv');
+
+        if (PHP_OS_FAMILY === 'Linux') {
+            // Composer runs the cps alongside each other, as it runs unzip.
+            $this->assertStringContainsString('with hard links, through cp', $output);
+            $command = "'cp' '-R' '-l' '-P' '--' .*/files' ";
+            $this->assertMatchesRegularExpression('{Executing async command \(.*\): ' . $command . '}', $output);
+        } else {
+            $this->assertStringContainsString('with hard links, file by file', $output);
+        }
+        $this->assertLinkedFromStore($project, 'acme/alpha', '2.0.0');
+        $this->assertLinkedFromStore($project, 'acme/beta', '1.0.0', copied: ['bin/beta']);
+    }
+
     public function testProjectTypeDependenciesAreLinkedLikeLibraries(): void
     {
         // Tools such as laravel/pint are of type project: Composer installs them like libraries.

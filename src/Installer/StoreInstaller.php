@@ -215,8 +215,9 @@ final class StoreInstaller extends LibraryInstaller
     /**
      * Links a store entry into vendor/, copying instead when that fails.
      *
-     * Clones are made by cp processes that Composer runs alongside each other, up to ten at once, as
-     * it does for unzip: one package after the other, cloning is slow on APFS.
+     * Without clonefile(2), clones are made by cp processes that Composer runs alongside each other, up
+     * to ten at once, as it does for unzip. So are hard links on Linux: one package after the other, in
+     * this process, linking is slower than Composer's own extraction on a machine with several CPUs.
      *
      * @return PromiseInterface<mixed>
      */
@@ -231,8 +232,12 @@ final class StoreInstaller extends LibraryInstaller
             $this->warn($e->getMessage() . ', copying ' . $package->getPrettyName() . ' from the store instead');
             $this->linker->copy($entry->filesDir(), $path);
         };
-        if ($this->method === Method::Reflink && $this->process !== null) {
-            return $this->linker->reflinkAsync($entry->filesDir(), $path, $this->runAsync(...))->then(
+        if ($this->process !== null) {
+            $placing = $this->method === Method::Reflink
+                ? $this->linker->reflinkAsync($entry->filesDir(), $path, $this->runAsync(...))
+                : $this->linker->linkAsync($entry->filesDir(), $path, $package->getBinaries(), $this->runAsync(...));
+
+            return $placing->then(
                 null,
                 static function (\Throwable $e) use ($copyInstead): void {
                     if (!$e instanceof LinkException) {
@@ -418,6 +423,11 @@ final class StoreInstaller extends LibraryInstaller
             $inProcess = $this->linker->cloner()->clonesInProcess();
             $this->process = $inProcess ? null : $this->project->getLoop()->getProcessExecutor();
             $how .= $inProcess ? ', through clonefile(2)' : ', through cp';
+        } elseif ($this->linker->hardLinker()->isSupported($root . '/tmp')) {
+            $this->process = $this->project->getLoop()->getProcessExecutor();
+            $how .= ', through cp';
+        } else {
+            $how .= ', file by file';
         }
         $message = sprintf('    composer-store: linking from %s with %s', $root, $how);
         $this->io->writeError($message, true, IOInterface::VERBOSE);

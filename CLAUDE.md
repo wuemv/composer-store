@@ -67,6 +67,7 @@ Implementation outline:
 - Override the install / update / remove code steps. In Composer 2 these return promises, so stay async-compatible.
 - Remove = delete `vendor/<pkg>` only. Never delete from the store during a project operation.
 - With hard links, files listed in a package's `bin` are copied, not linked: Composer chmods them in place on install and update, which through a hard link would change the store's copy for every project. Clones are files of their own, so with reflinks they are cloned like the rest.
+- On Linux, hard links are made by one `cp -R -l -P` per package (`Link\HardLinker`), several at once through Composer's async ProcessExecutor like the `cp` clones, and the `bin` files are then replaced by copies (`Linker::linkAsync()`). `-P` keeps symlinks as symlinks, hard links to themselves: without it GNU cp turns a package's symlinks into hard links to their targets, and fails on dangling ones. A probe under the store lock links a small tree with a file and a symlink and checks both, so a cp that behaves otherwise, or none, leaves hard links to PHP, file by file, as on macOS and Windows. With `-v` the installer says "with hard links, through cp" or "file by file".
 
 Packages that must be **copied, not linked** (skip rules):
 
