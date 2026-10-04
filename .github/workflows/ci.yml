@@ -23,7 +23,7 @@ jobs:
       - run: vendor/bin/phpstan analyse --no-progress
 
   tests:
-    name: PHP ${{ matrix.php }}, Composer ${{ matrix.composer }}, ${{ matrix.os }}
+    name: PHP ${{ matrix.php }}, Composer ${{ matrix.composer }}, ${{ matrix.os }}${{ matrix.reflink && ', Btrfs' || '' }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -36,6 +36,8 @@ jobs:
           # RemoteFilesystem, which the tests' local file:// repository goes through.
           - { php: '8.5', composer: '2.2' }
         include:
+          # Adds a Btrfs mount to this job, for the reflink tests (macOS runners have APFS anyway).
+          - { os: ubuntu-latest, php: '8.4', composer: '2', reflink: true }
           - { os: macos-latest, php: '8.1', composer: '2.2' }
           - { os: macos-latest, php: '8.5', composer: '2' }
           - { os: windows-latest, php: '8.1', composer: '2.2' }
@@ -49,6 +51,17 @@ jobs:
           tools: composer:v${{ matrix.composer }}
       - run: composer update --no-interaction --no-progress
       - run: composer --version
+      # The runner's ext4 has no reflinks: ReflinkTest clones for real in a loop-mounted Btrfs.
+      - name: Mount a Btrfs filesystem for the reflink tests
+        if: matrix.reflink
+        run: |
+          sudo apt-get install -y -q btrfs-progs
+          truncate -s 1G "$RUNNER_TEMP/reflink.img"
+          mkfs.btrfs -q "$RUNNER_TEMP/reflink.img"
+          sudo mkdir -p /mnt/reflink
+          sudo mount -o loop "$RUNNER_TEMP/reflink.img" /mnt/reflink
+          sudo chown "$(id -u):$(id -g)" /mnt/reflink
+          echo "COMPOSER_STORE_TEST_REFLINK_DIR=/mnt/reflink" >> "$GITHUB_ENV"
       # The integration tests run the Composer that setup-php put on the PATH.
       - run: vendor/bin/phpunit
 

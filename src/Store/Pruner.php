@@ -9,8 +9,9 @@ namespace ComposerStore\Store;
  *
  * An entry is in use while any of its files is hard-linked from a vendor/ directory (link count above
  * 1), or while a registered project's vendor/composer/installed.json lists that package version: the
- * second rule covers projects that copied rather than linked. Deleting a used entry would not break a
- * project (its links keep the data), but it would stop the sharing, so used entries are kept.
+ * second rule covers projects that cloned (reflinks) or copied rather than hard-linked. Deleting a used
+ * entry would not break a project (links and clones keep the data), but it would stop the sharing, so
+ * used entries are kept.
  *
  * Only call prune() while holding the store lock exclusively: installs must not be running.
  */
@@ -78,39 +79,11 @@ final class Pruner
                 $missing[] = $projectDir;
                 continue;
             }
-            foreach (self::installedVersions($project['vendor-dir']) as [$name, $version, $reference]) {
-                $used[$this->store->entryPath($name, $version, $reference)] = true;
+            foreach (InstalledPackages::read($project['vendor-dir']) as $package) {
+                $used[$this->store->entryPath($package['name'], $package['version'], $package['reference'])] = true;
             }
         }
 
         return [$used, $missing];
-    }
-
-    /**
-     * The dist-installed package versions in a vendor/ directory.
-     *
-     * @return list<array{string, string, string}> name, pretty version, dist reference
-     */
-    private static function installedVersions(string $vendorDir): array
-    {
-        $data = json_decode((string) @file_get_contents($vendorDir . '/composer/installed.json'), true);
-        if (!is_array($data)) {
-            return [];
-        }
-        // Composer 2 wraps the list in {"packages": [...]}; Composer 1 wrote the list itself.
-        $packages = is_array($data['packages'] ?? null) ? $data['packages'] : $data;
-
-        $versions = [];
-        foreach ($packages as $package) {
-            $name = is_array($package) ? $package['name'] ?? null : null;
-            $version = is_array($package) ? $package['version'] ?? null : null;
-            $dist = is_array($package) && is_array($package['dist'] ?? null) ? $package['dist'] : [];
-            $reference = $dist['reference'] ?? null;
-            if (is_string($name) && is_string($version) && is_string($reference) && $reference !== '') {
-                $versions[] = [$name, $version, $reference];
-            }
-        }
-
-        return $versions;
     }
 }

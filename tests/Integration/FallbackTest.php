@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace ComposerStore\Tests\Integration;
 
+use ComposerStore\Link\Cloner;
 use ComposerStore\Tests\Support\Files;
 
 /**
@@ -33,6 +34,22 @@ final class FallbackTest extends IntegrationTestCase
         $this->assertStringContainsString('is not on the same filesystem as', $output);
         $this->assertStringNotContainsString('into the store', $output);
         $this->assertNotLinked($project, 'acme/alpha');
+    }
+
+    public function testReflinkModeWithoutReflinksFallsBackToCopyingWithAWarning(): void
+    {
+        if ((new Cloner())->isSupported($this->work)) {
+            $this->markTestSkipped($this->work . ' supports reflinks');
+        }
+        $project = $this->createProject('app', ['acme/alpha' => '1.0.0'], ['mode' => 'reflink']);
+
+        $output = $this->composer($project, 'install');
+
+        $this->assertStringContainsString('mode is reflink, but', $output);
+        $this->assertStringNotContainsString('into the store', $output);
+        $this->assertNotLinked($project, 'acme/alpha');
+        $this->assertDirectoryDoesNotExist($this->store . '/packages/acme/alpha');
+        $this->assertFileDoesNotExist($this->store . '/projects.json', 'the project is not registered');
     }
 
     public function testAnUnknownModeWarnsAndUsesAuto(): void

@@ -63,10 +63,10 @@ Implementation outline:
 
 - `composer.json`: `"type": "composer-plugin"`, requires `composer-plugin-api: ^2.0`, PHP 8.1+.
 - Plugin class implements `PluginInterface` (and `Capable` for commands).
-- Register a custom installer extending `Composer\Installer\LibraryInstaller` that handles the `library` package type only. Other types (composer-plugin, metapackage, custom installer types from `composer/installers`) are left to their existing installers.
+- Register a custom installer extending `Composer\Installer\LibraryInstaller` that handles the `library` and `project` package types: Composer's default installer puts both in `vendor/<name>`, and tools such as `laravel/pint` are of type `project`. Other types (composer-plugin, metapackage, custom installer types from `composer/installers`) are left to their existing installers.
 - Override the install / update / remove code steps. In Composer 2 these return promises, so stay async-compatible.
 - Remove = delete `vendor/<pkg>` only. Never delete from the store during a project operation.
-- Files listed in a package's `bin` are copied, not linked: Composer chmods them in place on install and update, which through a hard link would change the store's copy for every project.
+- With hard links, files listed in a package's `bin` are copied, not linked: Composer chmods them in place on install and update, which through a hard link would change the store's copy for every project. Clones are files of their own, so with reflinks they are cloned like the rest.
 
 Packages that must be **copied, not linked** (skip rules):
 
@@ -87,11 +87,11 @@ Config (root `composer.json` `extra`, also readable from global Composer config)
 }
 ```
 
-`mode`: `auto` | `reflink` | `hardlink` | `copy`. `auto` picks reflink if supported, else hardlink if store and project share a filesystem (compare device IDs), else copy with a warning.
+`mode`: `auto` | `reflink` | `hardlink` | `copy`. `auto` picks reflink if supported, else hardlink if store and project share a filesystem (compare device IDs), else copy with a warning. `reflink` never falls back to hard links: where reflinks are not supported it warns and leaves installs to Composer. `copy` does not use the store.
 
 `exclude`: package names, `*` matches any characters. The global and project lists are combined; other keys from the project replace the global ones.
 
-`read-only`: removes the write bits of store files, so editing a linked file in `vendor/` fails. Hard links share permissions, so it applies to every project linking those versions, and existing entries become read-only when a read-only project links them. Root ignores file permissions. Not supported on Windows yet (a read-only file cannot be deleted there): ignored with a warning. Turning it off does not restore write bits; `chmod -R u+w "$COMPOSER_STORE_DIR/packages"` does.
+`read-only`: removes the write bits of store files, so editing a linked file in `vendor/` fails. Hard links share permissions, so it applies to every project linking those versions, and existing entries become read-only when a read-only project links them. Clones keep the permissions of the store's files, so they are read-only too, although an edit to a clone could not reach the store anyway. Root ignores file permissions. Not supported on Windows yet (a read-only file cannot be deleted there): ignored with a warning. Turning it off does not restore write bits; `chmod -R u+w "$COMPOSER_STORE_DIR/packages"` does.
 
 ## Phases
 
@@ -142,6 +142,13 @@ As built:
 - Windows NTFS: hard links only.
 - Auto-detect per machine.
 
+As built:
+
+- `Link\Cloner` runs the system `cp` once per package, never through a shell: `cp -R -T --reflink=always --preserve=mode,timestamps` on Linux (GNU cp; fails where the filesystem has no reflinks), `cp -c -R -p` on macOS. `cp -c` quietly copies on volumes without clonefile, so macOS also requires the store's volume to be APFS (from `mount`, longest mount point containing it). Anything else, Windows included, has no clones.
+- Detection runs once per install, under the store lock: same filesystem (device IDs), then a clone of a small probe file in the store's `tmp/` for `auto` and `reflink`. A clone that fails for one package falls back to copying that package from the store, with a warning, like a failed hard link.
+- `projects.json` records each project's method (`reflink` or `hardlink`). Prune keeps an entry while a registered project lists it, which is the only sign of a clone: link counts stay at 1. `store:status` adds the size of entries that reflinked projects list (dist installs) to the saved space, as an estimate: a clone stops sharing a file once it is edited.
+- The integration tests pin `mode: hardlink` in their global Composer config, so the existing tests mean the same on APFS. `ReflinkTest` sets the mode per project and clones for real on APFS or in `COMPOSER_STORE_TEST_REFLINK_DIR`; elsewhere on Linux it puts a stand-in `cp` first on the PATH, which copies, to run the same code. CI mounts a Btrfs image for one Linux job.
+
 ### Phase 5: Release
 
 - README: install (`composer global require`), `allow-plugins` line, config, uninstall steps, limitations.
@@ -167,7 +174,7 @@ CI (GitHub Actions): Ubuntu + macOS + Windows, PHP 8.1 to latest, at least two C
 
 - `composer test` runs the unit and integration suites (no network). `composer test:network` runs the fresh-Laravel-app test, which needs Packagist and GitHub. `composer lint` runs PHPCS (PSR-12) and PHPStan (max level).
 - Integration tests use the `composer` on the PATH, or `COMPOSER_STORE_TEST_COMPOSER=/path/to/composer`. They build a local git-backed fixture repository from `tests/Fixtures/packages/` and install the plugin globally into a throwaway Composer home.
-- Set `COMPOSER_STORE_TEST_KEEP=1` to keep the test temp dirs. `COMPOSER_STORE_TEST_OTHER_FS` points the cross-filesystem tests at a directory on another filesystem (default `/dev/shm`).
+- Set `COMPOSER_STORE_TEST_KEEP=1` to keep the test temp dirs. `COMPOSER_STORE_TEST_OTHER_FS` points the cross-filesystem tests at a directory on another filesystem (default `/dev/shm`). `COMPOSER_STORE_TEST_REFLINK_DIR` points `ReflinkTest` at a directory with reflinks (Btrfs, XFS); without it, they are real only on APFS.
 - Running Composer as root needs `COMPOSER_ALLOW_SUPERUSER=1`, otherwise plugins are disabled.
 - In sandboxes that block GitHub's archive downloads but allow `git`, install `tools/github-dist-shim` globally (see its README).
 

@@ -5,17 +5,18 @@ declare(strict_types=1);
 namespace ComposerStore;
 
 /**
- * How package files get from the store into vendor/ (`extra.composer-store.mode`).
+ * How package files get from the store into vendor/ (`extra.composer-store.mode`). Every mode except
+ * copy needs the store on the same filesystem as vendor/, and otherwise leaves installs to Composer.
  */
 enum Mode: string
 {
-    /** Hard links when the store and vendor/ share a filesystem, otherwise Composer's normal copy. */
+    /** Reflinks where the filesystem supports them (APFS, Btrfs, XFS...), hard links elsewhere. */
     case Auto = 'auto';
 
-    /** Copy-on-write clones. Not implemented yet: packages are installed without the store. */
+    /** Copy-on-write clones only. Where reflinks are not supported, the store is not used. */
     case Reflink = 'reflink';
 
-    /** Hard links, with Composer's normal copy when the store is on another filesystem. */
+    /** Hard links, even where reflinks are supported. */
     case Hardlink = 'hardlink';
 
     /** Leave installs to Composer: the store is not used. */

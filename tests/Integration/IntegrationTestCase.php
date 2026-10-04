@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace ComposerStore\Tests\Integration;
 
+use ComposerStore\Link\Method;
 use ComposerStore\Tests\Integration\Support\Environment;
 use ComposerStore\Tests\Integration\Support\FixtureRepository;
 use ComposerStore\Tests\Support\Files;
@@ -24,6 +25,9 @@ abstract class IntegrationTestCase extends TestCase
     protected string $work;
 
     protected string $store;
+
+    /** @var array<string, string> environment variables for every Composer run of the test */
+    protected array $composerEnv = [];
 
     /** @var list<string> */
     private array $cleanup = [];
@@ -122,7 +126,7 @@ abstract class IntegrationTestCase extends TestCase
         array $env = [],
         bool $network = false,
     ): RunningProcess {
-        return $this->env->composer->start($project, $args, $env + [
+        return $this->env->composer->start($project, $args, $env + $this->composerEnv + [
             'COMPOSER_HOME' => $plugin ? $this->env->pluginHome : $this->env->plainHome,
             'COMPOSER_CACHE_DIR' => $this->env->cache,
             'COMPOSER_STORE_DIR' => $this->store,
@@ -150,8 +154,9 @@ abstract class IntegrationTestCase extends TestCase
     }
 
     /**
-     * vendor/<package> holds the same tree as the store entry, and every file is a hard link to the
-     * store's copy except the ones in $copied.
+     * vendor/<package> holds the same tree as the store entry. If the project's last install used
+     * reflinks, every file is a clone: a file of its own with the same content. Otherwise every file is
+     * a hard link to the store's copy, except the ones in $copied.
      *
      * @param list<string> $copied
      */
@@ -169,12 +174,19 @@ abstract class IntegrationTestCase extends TestCase
             "vendor/{$package} differs from the store"
         );
 
+        $cloned = $this->linkMethod($project) === Method::Reflink;
         foreach ($storeFiles as $relative => $info) {
+            $file = $vendor . '/' . $relative;
             if (!$info->isFile()) {
-                $this->assertFalse(is_link($vendor . '/' . $relative), "vendor/{$package}/{$relative} is a symlink");
+                $this->assertFalse(is_link($file), "vendor/{$package}/{$relative} is a symlink");
                 continue;
             }
-            $shared = fileinode($vendor . '/' . $relative) === $info->getInode();
+            $shared = fileinode($file) === $info->getInode();
+            if ($cloned) {
+                $this->assertFalse($shared, "vendor/{$package}/{$relative} should be a clone, not a hard link");
+                $this->assertFileEquals($info->getPathname(), $file, "vendor/{$package}/{$relative} differs");
+                continue;
+            }
             $expected = !in_array($relative, $copied, true);
             $this->assertSame($expected, $shared, sprintf(
                 'vendor/%s/%s should %sbe a hard link to the store',
@@ -183,6 +195,19 @@ abstract class IntegrationTestCase extends TestCase
                 $expected ? '' : 'not '
             ));
         }
+    }
+
+    /**
+     * The method the project's last install used, from the store's projects.json.
+     */
+    protected function linkMethod(string $project): ?Method
+    {
+        $registry = is_file($this->store . '/projects.json') ? Files::readJson($this->store . '/projects.json') : [];
+        $projects = is_array($registry['projects'] ?? null) ? $registry['projects'] : [];
+        $record = $projects[realpath($project)] ?? null;
+        $method = is_array($record) ? $record['method'] ?? null : null;
+
+        return is_string($method) ? Method::tryFrom($method) : null;
     }
 
     /**
@@ -232,6 +257,21 @@ abstract class IntegrationTestCase extends TestCase
         $require = is_array($manifest['require'] ?? null) ? $manifest['require'] : [];
         $manifest['require'] = [$package => $constraint] + $require;
         Files::writeJson($project . '/composer.json', $manifest);
+    }
+
+    /**
+     * The JSON a command printed on stdout.
+     *
+     * @return array<mixed>
+     */
+    protected function json(ProcessResult $result): array
+    {
+        // Composer 2.0 prints PHP 8 deprecation notices on stdout before the command runs.
+        $json = (string) preg_replace('{\A.*?^(?=\{$)}ms', '', $result->stdout);
+        $data = json_decode($json, true);
+        $this->assertIsArray($data, $result->describe());
+
+        return $data;
     }
 
     private function succeeded(ProcessResult $result, bool $stdoutOnly = false): string

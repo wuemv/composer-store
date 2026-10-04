@@ -4,12 +4,17 @@ declare(strict_types=1);
 
 namespace ComposerStore\Store;
 
+use ComposerStore\Link\Method;
+
 /**
- * `projects.json`: the projects that have linked from the store, with their vendor directory. Pruning
- * reads their `vendor/composer/installed.json` to know which entries are still in use.
+ * `projects.json`: the projects that have linked from the store, with their vendor directory and the
+ * method of their last install. Pruning reads their `vendor/composer/installed.json` to know which
+ * entries are still in use: clones, unlike hard links, do not show in the store's link counts.
  *
  * Every change is a read-modify-write under its own short lock (not the store lock, which installs
  * hold shared), and the file is replaced with an atomic rename.
+ *
+ * @phpstan-type Record array{vendor-dir: string, last-install: string, method: string}
  */
 final class ProjectRegistry
 {
@@ -20,29 +25,30 @@ final class ProjectRegistry
     }
 
     /**
-     * @return array<string, array{vendor-dir: string, last-install: string}> project directory => details
+     * @return array<string, array{vendor-dir: string, last-install: string, method: ?Method}> by project directory
      */
     public function projects(): array
     {
-        $data = json_decode((string) @file_get_contents($this->file), true);
-        $entries = is_array($data) && is_array($data['projects'] ?? null) ? $data['projects'] : [];
-        $projects = [];
-        foreach ($entries as $dir => $details) {
-            if (is_string($dir) && is_array($details) && is_string($details['vendor-dir'] ?? null)) {
-                $lastInstall = is_string($details['last-install'] ?? null) ? $details['last-install'] : '';
-                $projects[$dir] = ['vendor-dir' => $details['vendor-dir'], 'last-install' => $lastInstall];
-            }
-        }
-
-        return $projects;
+        return array_map(
+            static fn (array $record): array => [
+                'vendor-dir' => $record['vendor-dir'],
+                'last-install' => $record['last-install'],
+                'method' => Method::tryFrom($record['method']),
+            ],
+            $this->records()
+        );
     }
 
-    public function register(string $projectDir, string $vendorDir): void
+    public function register(string $projectDir, string $vendorDir, Method $method): void
     {
-        $this->update(static function (array $projects) use ($projectDir, $vendorDir): array {
-            $projects[$projectDir] = ['vendor-dir' => $vendorDir, 'last-install' => gmdate(DATE_ATOM)];
+        $this->update(static function (array $records) use ($projectDir, $vendorDir, $method): array {
+            $records[$projectDir] = [
+                'vendor-dir' => $vendorDir,
+                'last-install' => gmdate(DATE_ATOM),
+                'method' => $method->value,
+            ];
 
-            return $projects;
+            return $records;
         });
     }
 
@@ -55,7 +61,32 @@ final class ProjectRegistry
     }
 
     /**
-     * @param callable(array<string, array{vendor-dir: string, last-install: string}>): array<string, mixed> $change
+     * The file's valid records. `method` is empty in records from older plugin versions.
+     *
+     * @return array<string, Record>
+     */
+    private function records(): array
+    {
+        $data = json_decode((string) @file_get_contents($this->file), true);
+        $entries = is_array($data) && is_array($data['projects'] ?? null) ? $data['projects'] : [];
+        $records = [];
+        foreach ($entries as $dir => $details) {
+            if (is_string($dir) && is_array($details) && is_string($details['vendor-dir'] ?? null)) {
+                $lastInstall = $details['last-install'] ?? null;
+                $method = $details['method'] ?? null;
+                $records[$dir] = [
+                    'vendor-dir' => $details['vendor-dir'],
+                    'last-install' => is_string($lastInstall) ? $lastInstall : '',
+                    'method' => is_string($method) ? $method : '',
+                ];
+            }
+        }
+
+        return $records;
+    }
+
+    /**
+     * @param callable(array<string, Record>): array<string, mixed> $change
      */
     private function update(callable $change): void
     {
@@ -64,7 +95,7 @@ final class ProjectRegistry
             throw new StoreException(sprintf('Cannot lock %s: %s', $this->file, $lock->failure()));
         }
         try {
-            $projects = $change($this->projects());
+            $projects = $change($this->records());
             ksort($projects);
             $json = json_encode(['projects' => $projects], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n";
             $temp = $this->file . '.' . bin2hex(random_bytes(4)) . '.tmp';

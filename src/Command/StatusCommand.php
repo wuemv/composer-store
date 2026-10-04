@@ -7,8 +7,13 @@ namespace ComposerStore\Command;
 use Composer\Composer;
 use Composer\Factory;
 use ComposerStore\Config;
+use ComposerStore\Link\Cloner;
+use ComposerStore\Link\Device;
+use ComposerStore\Link\Method;
+use ComposerStore\Link\MethodChoice;
 use ComposerStore\Mode;
 use ComposerStore\Store\EntryStats;
+use ComposerStore\Store\InstalledPackages;
 use ComposerStore\Store\Store;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Output\OutputInterface;
@@ -21,9 +26,10 @@ final class StatusCommand extends StoreCommand
             ->setDescription('Shows where the store is, what it holds and how much disk space it saves')
             ->setHelp(
                 <<<'HELP'
-                Shows the store's location, size and package count, and the disk space saved by the
-                hard links from vendor/ directories: the space those links would take as separate
-                copies. Inside a project, also shows whether that project links from the store.
+                Shows the store's location, size and package count, and an estimate of the disk space
+                it saves: the space the hard links from vendor/ directories would take as copies, plus
+                the size of the package versions that registered projects cloned with reflinks.
+                Inside a project, also shows whether that project links from the store, and how.
                 HELP
             );
         $this->addFormatOption();
@@ -35,14 +41,19 @@ final class StatusCommand extends StoreCommand
         $store = $this->store();
 
         $stats = new EntryStats();
+        $sizes = [];
         $packages = [];
         $entries = $store->entries();
         foreach ($entries as $entry) {
-            $stats = $stats->add(EntryStats::of($entry->filesDir()));
+            $entryStats = EntryStats::of($entry->filesDir());
+            $stats = $stats->add($entryStats);
+            $sizes[$entry->path] = $entryStats->bytes;
             $packages[$entry->name] = true;
         }
-        $projects = array_keys($store->projects()->projects());
-        $missingProjects = count(array_filter($projects, static fn (string $dir): bool => !is_dir($dir)));
+        $projects = $store->projects()->projects();
+        $missingProjects = count(array_filter(array_keys($projects), static fn (string $dir): bool => !is_dir($dir)));
+        [$clones, $cloningProjects, $clonedBytes] = $this->clones($store, $projects, $sizes);
+        $savedBytes = $stats->savedBytes + $clonedBytes;
         $tempDirs = count($store->tempDirs());
         $composer = $this->project();
         $project = $composer === null ? null : $this->projectStatus($composer, $store);
@@ -57,7 +68,9 @@ final class StatusCommand extends StoreCommand
                 'bytes' => $stats->bytes,
                 'linked-files' => $stats->linkedFiles,
                 'links' => $stats->links,
-                'saved-bytes' => $stats->savedBytes,
+                'clones' => $clones,
+                'cloned-bytes' => $clonedBytes,
+                'saved-bytes' => $savedBytes,
                 'projects' => count($projects),
                 'missing-projects' => $missingProjects,
                 'temp-dirs' => $tempDirs,
@@ -73,8 +86,14 @@ final class StatusCommand extends StoreCommand
                 . self::count(count($entries), 'version'),
             'Size' => self::size($stats->bytes) . ' in ' . self::count($stats->files, 'file'),
             'Linked' => self::count($stats->linkedFiles, 'file') . ', by '
-                . self::count($stats->links, 'link') . ' from vendor/ directories',
-            'Saved' => self::size($stats->savedBytes),
+                . self::count($stats->links, 'hard link') . ' from vendor/ directories',
+        ];
+        if ($clones > 0) {
+            $rows['Cloned'] = self::count($clones, 'package version') . ', by '
+                . self::count($cloningProjects, 'project') . ' using reflinks';
+        }
+        $rows += [
+            'Saved' => self::size($savedBytes) . ($clones > 0 ? ' (estimated)' : ''),
             'Projects' => self::count(count($projects), 'project') . ' registered'
                 . ($missingProjects > 0 ? sprintf(', %d no longer there', $missingProjects) : ''),
         ];
@@ -83,9 +102,7 @@ final class StatusCommand extends StoreCommand
                 . ' left by interrupted installs';
         }
         if ($project !== null) {
-            $rows['This project'] = $project['links']
-                ? '<info>links from the store</info>'
-                : '<comment>does not link from the store: ' . self::escape($project['reason']) . '</comment>';
+            $rows['This project'] = self::describeProject($project);
             $rows['Settings'] = sprintf(
                 'mode %s, read-only %s',
                 $project['mode'],
@@ -103,9 +120,41 @@ final class StatusCommand extends StoreCommand
     }
 
     /**
-     * Whether the project links from the store, as far as can be told without installing.
+     * The store entries that registered projects cloned with reflinks, as listed in their
+     * installed.json. An estimate: a clone stops sharing the blocks of a file once it is edited.
      *
-     * @return array{dir: string, vendor-dir: string, mode: string, read-only: bool, links: bool, reason: string}
+     * @param array<string, array{vendor-dir: string, last-install: string, method: ?Method}> $projects
+     * @param array<string, int>                                                            $sizes by entry path
+     *
+     * @return array{int, int, int} clones, projects that cloned, bytes the clones share with the store
+     */
+    private function clones(Store $store, array $projects, array $sizes): array
+    {
+        $clones = $cloningProjects = $bytes = 0;
+        foreach ($projects as $dir => $project) {
+            if ($project['method'] !== Method::Reflink || !is_dir($dir)) {
+                continue;
+            }
+            $cloned = 0;
+            foreach (InstalledPackages::read($project['vendor-dir']) as $package) {
+                $path = $store->entryPath($package['name'], $package['version'], $package['reference']);
+                if ($package['source'] === 'dist' && isset($sizes[$path])) {
+                    $cloned++;
+                    $bytes += $sizes[$path];
+                }
+            }
+            $clones += $cloned;
+            $cloningProjects += $cloned > 0 ? 1 : 0;
+        }
+
+        return [$clones, $cloningProjects, $bytes];
+    }
+
+    /**
+     * Whether the project links from the store and how, as far as can be told without installing.
+     *
+     * @return array{dir: string, vendor-dir: string, mode: string, read-only: bool, links: bool,
+     *     method: ?string, reason: string}
      */
     private function projectStatus(Composer $composer, Store $store): array
     {
@@ -114,14 +163,18 @@ final class StatusCommand extends StoreCommand
         $vendorDir = is_string($vendorDir) ? $vendorDir : 'vendor';
         $composerJson = realpath(Factory::getComposerFile());
 
+        $method = null;
         $reason = '';
         if ($config->mode === Mode::Copy) {
             $reason = 'mode is copy';
-        } elseif ($config->mode === Mode::Reflink) {
-            $reason = 'reflink mode is not implemented yet';
-        } elseif (self::device($store->root()) !== self::device($vendorDir)) {
+        } elseif (!Device::same($store->root(), $vendorDir)) {
             $reason = 'the store is on another filesystem than ' . $vendorDir;
+        } elseif (is_dir($store->root() . '/tmp')) {
+            $choice = MethodChoice::make($config->mode, $store->root(), new Cloner());
+            $method = $choice->method?->value;
+            $reason = $choice->reason;
         }
+        // Without a store yet, the first install picks the method.
 
         return [
             'dir' => $composerJson === false ? (string) getcwd() : dirname($composerJson),
@@ -129,24 +182,23 @@ final class StatusCommand extends StoreCommand
             'mode' => $config->mode->value,
             'read-only' => $config->readOnly && PHP_OS_FAMILY !== 'Windows',
             'links' => $reason === '',
+            'method' => $method,
             'reason' => $reason,
         ];
     }
 
     /**
-     * The device of a path, or of its closest existing parent: where it would be created.
+     * @param array{links: bool, method: ?string, reason: string} $project
      */
-    private static function device(string $path): ?int
+    private static function describeProject(array $project): string
     {
-        while (!file_exists($path)) {
-            $parent = dirname($path);
-            if ($parent === $path) {
-                return null;
-            }
-            $path = $parent;
+        if (!$project['links']) {
+            return '<comment>does not link from the store: ' . self::escape($project['reason']) . '</comment>';
         }
-        $stat = @stat($path);
+        $method = Method::tryFrom((string) $project['method']);
 
-        return $stat === false ? null : $stat['dev'];
+        return $method === null
+            ? '<info>links from the store</info> (its first install picks reflinks or hard links)'
+            : '<info>links from the store with ' . $method->describe() . '</info>';
     }
 }

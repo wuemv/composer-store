@@ -69,7 +69,8 @@ final class LaravelTest extends TestCase
         $this->assertMatchesRegularExpression('{Verified \d+ entries: \d+ ok, 0 changed, 0 invalid\n}', $verify);
         $status = $this->composer($second, 'store:status');
         $this->assertMatchesRegularExpression('{^Projects: +2 projects registered$}m', $status);
-        $this->assertMatchesRegularExpression('{^This project: +links from the store$}m', $status);
+        $linking = '{^This project: +links from the store with (hard links|reflinks)$}m';
+        $this->assertMatchesRegularExpression($linking, $status);
         $this->assertStringContainsString('Nothing to prune', $this->composer($second, 'store:prune'));
     }
 

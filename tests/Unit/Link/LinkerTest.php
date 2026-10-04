@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace ComposerStore\Tests\Unit\Link;
 
+use ComposerStore\Link\Cloner;
 use ComposerStore\Link\LinkException;
 use ComposerStore\Link\Linker;
+use ComposerStore\Tests\Support\FakeCp;
 use ComposerStore\Tests\Support\Files;
 use PHPUnit\Framework\Attributes\RequiresOperatingSystem;
 use PHPUnit\Framework\TestCase;
@@ -134,5 +136,36 @@ final class LinkerTest extends TestCase
                 $this->assertSame($info->getPerms() & 0777, fileperms($copy) & 0777);
             }
         }
+    }
+
+    #[RequiresOperatingSystem('Linux')]
+    public function testReflinkClonesEveryFileIncludingBinaries(): void
+    {
+        $path = getenv('PATH');
+        FakeCp::write($this->dir . '/fake-bin');
+        putenv('PATH=' . $this->dir . '/fake-bin' . PATH_SEPARATOR . $path);
+        try {
+            (new Linker(new Cloner('Linux')))->reflink($this->source, $this->target);
+        } finally {
+            putenv($path === false ? 'PATH' : 'PATH=' . $path);
+        }
+
+        $this->assertSame(Files::snapshot($this->source), Files::snapshot($this->target));
+        $this->assertDirectoryExists($this->target . '/empty');
+        foreach (['README.md', 'src/Foo.php', 'bin/tool'] as $file) {
+            $this->assertNotSame(fileinode($this->source . '/' . $file), fileinode($this->target . '/' . $file));
+        }
+    }
+
+    public function testAFailedCloneLeavesNothingBehind(): void
+    {
+        try {
+            (new Linker(new Cloner('Windows')))->reflink($this->source, $this->target);
+            $this->fail('reflink() did not fail');
+        } catch (LinkException) {
+        }
+
+        $this->assertFileDoesNotExist($this->target);
+        $this->assertSame([], glob(dirname($this->target) . '/.*composer-store*') ?: []);
     }
 }

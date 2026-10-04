@@ -14,8 +14,11 @@ use Composer\Installer\LibraryInstaller;
 use Composer\IO\IOInterface;
 use Composer\Package\PackageInterface;
 use ComposerStore\Config;
+use ComposerStore\Link\Device;
 use ComposerStore\Link\LinkException;
 use ComposerStore\Link\Linker;
+use ComposerStore\Link\Method;
+use ComposerStore\Link\MethodChoice;
 use ComposerStore\Mode;
 use ComposerStore\Store\PublishResult;
 use ComposerStore\Store\Store;
@@ -25,10 +28,10 @@ use ComposerStore\Store\StoreLock;
 use React\Promise\PromiseInterface;
 
 /**
- * Installs `library` packages from the store: a version is extracted into the store once, and each
- * project's vendor/ gets hard links to it. Anything else (source installs, path repositories,
- * non-archive dists, excluded or patched packages, store on another filesystem) is left to
- * Composer's normal install.
+ * Installs `library` and `project` packages from the store: a version is extracted into the store once,
+ * and each project's vendor/ gets reflinks (copy-on-write clones) or hard links to it. Anything else
+ * (source installs, path repositories, non-archive dists, excluded or patched packages, store on
+ * another filesystem) is left to Composer's normal install.
  *
  * Composer still downloads the archive first: its download step decides between dist and source,
  * and that decision is only visible afterwards, through the package's installation source.
@@ -36,6 +39,12 @@ use React\Promise\PromiseInterface;
 final class StoreInstaller extends LibraryInstaller
 {
     private const ARCHIVE_TYPES = ['zip', 'tar'];
+
+    /**
+     * The package types Composer installs into vendor/<name> with its default installer. Other types
+     * belong to installers of their own (composer/installers and the like), or have no files.
+     */
+    private const PACKAGE_TYPES = ['library', 'project'];
 
     private readonly DownloadManager $downloads;
 
@@ -47,6 +56,8 @@ final class StoreInstaller extends LibraryInstaller
     private ?bool $storeUsable = null;
 
     private bool $readOnly = false;
+
+    private Method $method = Method::Hardlink;
 
     private ?SkipRules $skipRules = null;
 
@@ -61,6 +72,16 @@ final class StoreInstaller extends LibraryInstaller
         $this->downloads = $composer->getDownloadManager();
         $this->project = $composer;
         $this->lock = $store->lock();
+    }
+
+    /**
+     * @param string $packageType untyped like in Composer 2.0, where the parent declares no type
+     *
+     * @return bool
+     */
+    public function supports($packageType)
+    {
+        return in_array($packageType, self::PACKAGE_TYPES, true);
     }
 
     /**
@@ -187,7 +208,7 @@ final class StoreInstaller extends LibraryInstaller
     }
 
     /**
-     * Links a store entry into vendor/, copying instead when hard links fail.
+     * Links a store entry into vendor/, copying instead when that fails.
      */
     private function place(PackageInterface $package, StoreEntry $entry, string $path): void
     {
@@ -197,7 +218,11 @@ final class StoreInstaller extends LibraryInstaller
         }
 
         try {
-            $this->linker->link($entry->filesDir(), $path, $package->getBinaries());
+            if ($this->method === Method::Reflink) {
+                $this->linker->reflink($entry->filesDir(), $path);
+            } else {
+                $this->linker->link($entry->filesDir(), $path, $package->getBinaries());
+            }
         } catch (LinkException $e) {
             $this->warn($e->getMessage() . ', copying ' . $package->getPrettyName() . ' from the store instead');
             $this->linker->copy($entry->filesDir(), $path);
@@ -297,11 +322,6 @@ final class StoreInstaller extends LibraryInstaller
         if ($this->config->mode === Mode::Copy) {
             return false;
         }
-        if ($this->config->mode === Mode::Reflink) {
-            $this->warn('reflink mode is not implemented yet, installing packages without the store');
-
-            return false;
-        }
 
         try {
             $root = $this->store->initialize();
@@ -312,9 +332,7 @@ final class StoreInstaller extends LibraryInstaller
         }
 
         $this->initializeVendorDir();
-        $storeStat = @stat($root);
-        $vendorStat = @stat($this->vendorDir);
-        if ($storeStat === false || $vendorStat === false || $storeStat['dev'] !== $vendorStat['dev']) {
+        if (!Device::same($root, $this->vendorDir)) {
             $this->warn(sprintf(
                 'the store (%s) is not on the same filesystem as %s, so packages are copied as usual. '
                 . 'Set COMPOSER_STORE_DIR to a directory on that filesystem to share them.',
@@ -328,6 +346,20 @@ final class StoreInstaller extends LibraryInstaller
         if (!$this->lockStore($root)) {
             return false;
         }
+        // Probed under the lock: store:prune empties tmp/.
+        $choice = MethodChoice::make($this->config->mode, $root, $this->linker->cloner());
+        if ($choice->method === null) {
+            $this->lock->release();
+            $this->warn(sprintf(
+                'mode is reflink, but %s, so packages are copied as usual. Mode auto would use hard links.',
+                $choice->reason
+            ));
+
+            return false;
+        }
+        $this->method = $choice->method;
+        $message = sprintf('    composer-store: linking from %s with %s', $root, $this->method->describe());
+        $this->io->writeError($message, true, IOInterface::VERBOSE);
         $this->registerProject();
 
         $this->readOnly = $this->config->readOnly;
@@ -369,7 +401,7 @@ final class StoreInstaller extends LibraryInstaller
     private function registerProject(): void
     {
         try {
-            $this->store->projects()->register($this->projectDir(), $this->vendorDir);
+            $this->store->projects()->register($this->projectDir(), $this->vendorDir, $this->method);
         } catch (StoreException $e) {
             $this->io->writeError('    composer-store: ' . $e->getMessage(), true, IOInterface::VERBOSE);
         }

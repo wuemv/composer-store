@@ -98,15 +98,26 @@ final class InstallTest extends IntegrationTestCase
         $this->assertSame('beta runs with alpha 2.0.0' . PHP_EOL, $result->stdout, $result->describe());
     }
 
-    public function testPackagesThatAreNotLibrariesAreLeftToComposer(): void
+    public function testProjectTypeDependenciesAreLinkedLikeLibraries(): void
     {
+        // Tools such as laravel/pint are of type project: Composer installs them like libraries.
         $project = $this->createProject('app', ['acme/delta' => '1.0.0']);
 
         $output = $this->composer($project, 'install');
 
-        $this->assertStringContainsString('Installing acme/delta (1.0.0): Extracting archive', $output);
+        $this->assertStringContainsString('Installing acme/delta (1.0.0): Extracting archive into the store', $output);
+        $this->assertLinkedFromStore($project, 'acme/delta', '1.0.0');
+    }
+
+    public function testOtherPackageTypesAreLeftToComposer(): void
+    {
+        $project = $this->createProject('app', ['acme/epsilon' => '1.0.0']);
+
+        $output = $this->composer($project, 'install');
+
+        $this->assertStringContainsString('Installing acme/epsilon (1.0.0): Extracting archive', $output);
         $this->assertStringNotContainsString('into the store', $output);
-        $this->assertNotLinked($project, 'acme/delta');
-        $this->assertDirectoryDoesNotExist($this->store . '/packages/acme/delta');
+        $this->assertNotLinked($project, 'acme/epsilon');
+        $this->assertDirectoryDoesNotExist($this->store . '/packages/acme/epsilon');
     }
 }

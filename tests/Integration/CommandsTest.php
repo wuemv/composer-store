@@ -39,13 +39,14 @@ final class CommandsTest extends IntegrationTestCase
         $project = $status['project'];
         $this->assertIsArray($project);
         $this->assertSame(realpath($first), $project['dir']);
-        $this->assertSame('auto', $project['mode']);
+        $this->assertSame('hardlink', $project['mode']);
+        $this->assertSame('hardlink', $project['method']);
         $this->assertTrue($project['links']);
 
         $text = self::text($this->storeCommand($first, 'store:status'));
         $this->assertMatchesRegularExpression('{^Packages: +2 packages, 2 versions$}m', $text);
         $this->assertMatchesRegularExpression('{^Projects: +2 projects registered$}m', $text);
-        $this->assertMatchesRegularExpression('{^This project: +links from the store$}m', $text);
+        $this->assertMatchesRegularExpression('{^This project: +links from the store with hard links$}m', $text);
 
         // Outside of a project, it only describes the store.
         Files::makeDir($this->work . '/elsewhere');
@@ -258,19 +259,6 @@ final class CommandsTest extends IntegrationTestCase
     private static function text(ProcessResult $result): string
     {
         return str_replace("\r\n", "\n", $result->stdout);
-    }
-
-    /**
-     * @return array<mixed>
-     */
-    private function json(ProcessResult $result): array
-    {
-        // Composer 2.0 prints PHP 8 deprecation notices on stdout before the command runs.
-        $json = (string) preg_replace('{\A.*?^(?=\{$)}ms', '', $result->stdout);
-        $data = json_decode($json, true);
-        $this->assertIsArray($data, $result->describe());
-
-        return $data;
     }
 
     private function string(mixed $value): string

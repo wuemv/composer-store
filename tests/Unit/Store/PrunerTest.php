@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace ComposerStore\Tests\Unit\Store;
 
+use ComposerStore\Link\Method;
 use ComposerStore\Store\Pruner;
 use ComposerStore\Store\Store;
 use ComposerStore\Store\StoreEntry;
@@ -69,7 +70,7 @@ final class PrunerTest extends TestCase
         Files::writeJson($vendor . '/composer/installed.json', [
             ['name' => 'acme/listed', 'version' => '1.0.0', 'dist' => ['reference' => self::LISTED]],
         ]);
-        $this->store->projects()->register($this->root . '/old-app', $vendor);
+        $this->store->projects()->register($this->root . '/old-app', $vendor, Method::Hardlink);
 
         $this->assertSame([], (new Pruner($this->store))->plan()->entries);
     }
@@ -80,7 +81,7 @@ final class PrunerTest extends TestCase
         $temp = $this->store->createTempDir();
         file_put_contents($temp . '/partial.php', str_repeat('x', 5000));
         $this->registerProject('app', []);
-        $this->store->projects()->register($this->root . '/deleted', $this->root . '/deleted/vendor');
+        $this->store->projects()->register($this->root . '/deleted', $this->root . '/deleted/vendor', Method::Hardlink);
 
         $plan = (new Pruner($this->store))->plan();
 
@@ -99,7 +100,7 @@ final class PrunerTest extends TestCase
         $unused = $this->publishEntry($this->store, 'acme/unused', '1.0.0', self::UNUSED);
         $otherVersion = $this->publishEntry($this->store, 'acme/linked', '0.9.0', self::UNUSED);
         $temp = $this->store->createTempDir();
-        $this->store->projects()->register($this->root . '/deleted', $this->root . '/deleted/vendor');
+        $this->store->projects()->register($this->root . '/deleted', $this->root . '/deleted/vendor', Method::Hardlink);
         $pruner = new Pruner($this->store);
 
         $failures = $pruner->prune($pruner->plan());
@@ -138,7 +139,7 @@ final class PrunerTest extends TestCase
     {
         $vendor = $this->root . '/' . $name . '/vendor';
         Files::writeJson($vendor . '/composer/installed.json', ['packages' => $packages, 'dev' => true]);
-        $this->store->projects()->register($this->root . '/' . $name, $vendor);
+        $this->store->projects()->register($this->root . '/' . $name, $vendor, Method::Hardlink);
     }
 
     /**

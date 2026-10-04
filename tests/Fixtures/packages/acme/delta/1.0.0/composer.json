@@ -1,6 +1,6 @@
 {
     "name": "acme/delta",
-    "description": "Fixture dependency that is not of type library.",
+    "description": "Fixture dependency of type project, like laravel/pint.",
     "type": "project",
     "autoload": {
         "psr-4": {

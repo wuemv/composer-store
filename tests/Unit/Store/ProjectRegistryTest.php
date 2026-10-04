@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace ComposerStore\Tests\Unit\Store;
 
+use ComposerStore\Link\Method;
 use ComposerStore\Store\ProjectRegistry;
 use ComposerStore\Tests\Support\Files;
 use PHPUnit\Framework\TestCase;
@@ -34,9 +35,9 @@ final class ProjectRegistryTest extends TestCase
     {
         $registry = new ProjectRegistry($this->file);
 
-        $registry->register('/work/b', '/work/b/vendor');
-        $registry->register('/work/a', '/work/a/vendor');
-        $registry->register('/work/b', '/work/b/lib');
+        $registry->register('/work/b', '/work/b/vendor', Method::Hardlink);
+        $registry->register('/work/a', '/work/a/vendor', Method::Hardlink);
+        $registry->register('/work/b', '/work/b/lib', Method::Hardlink);
 
         $projects = $registry->projects();
         $this->assertSame(['/work/a', '/work/b'], array_keys($projects));
@@ -49,7 +50,7 @@ final class ProjectRegistryTest extends TestCase
     {
         $registry = new ProjectRegistry($this->file);
         foreach (['/work/a', '/work/b', '/work/c'] as $project) {
-            $registry->register($project, $project . '/vendor');
+            $registry->register($project, $project . '/vendor', Method::Hardlink);
         }
 
         $registry->forget(['/work/a', '/work/c', '/work/never-registered']);
@@ -64,7 +65,7 @@ final class ProjectRegistryTest extends TestCase
 
         $this->assertSame([], $registry->projects());
 
-        $registry->register('/work/a', '/work/a/vendor');
+        $registry->register('/work/a', '/work/a/vendor', Method::Hardlink);
         $this->assertSame(['/work/a'], array_keys($registry->projects()));
     }
 
@@ -77,7 +78,7 @@ final class ProjectRegistryTest extends TestCase
         ]]);
 
         $this->assertSame(
-            ['/work/a' => ['vendor-dir' => '/work/a/vendor', 'last-install' => '']],
+            ['/work/a' => ['vendor-dir' => '/work/a/vendor', 'last-install' => '', 'method' => null]],
             (new ProjectRegistry($this->file))->projects()
         );
     }

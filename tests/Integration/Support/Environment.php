@@ -95,6 +95,8 @@ final class Environment
             ],
             'require' => [self::PLUGIN_NAME => '1.0.0'],
             'config' => ['allow-plugins' => [self::PLUGIN_NAME => true]],
+            // The same method on every machine: auto would clone on APFS. ReflinkTest sets mode itself.
+            'extra' => ['composer-store' => ['mode' => 'hardlink']],
         ]);
         $result = $this->composer->run($this->pluginHome, ['install'], [
             'COMPOSER_HOME' => $this->pluginHome,
