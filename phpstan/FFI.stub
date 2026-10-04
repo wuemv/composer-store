@@ -1,0 +1,10 @@
+<?php
+
+/**
+ * The C functions called through FFI::cdef(), which PHP resolves at run time.
+ *
+ * @method int clonefile(string $src, string $dst, int $flags) macOS: clone a file or a directory tree
+ */
+final class FFI
+{
+}

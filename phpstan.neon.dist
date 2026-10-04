@@ -6,3 +6,5 @@ parameters:
         - benchmarks
     excludePaths:
         - tests/Fixtures
+    stubFiles:
+        - phpstan/FFI.stub

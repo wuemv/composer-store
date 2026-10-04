@@ -1,30 +1,29 @@
-name: Benchmarks
+name: Placement
 
-# Runs when the benchmark or its projects change. The results are in each job's summary;
-# benchmarks/RESULTS.md collects them.
+# Times ways of putting package files into vendor/ (benchmarks/placement.php), on a store and a
+# Composer cache filled by one run of the benchmark. Runs when the script changes, or by hand.
 on:
   push:
     paths:
-      - 'benchmarks/Benchmark.php'
-      - 'benchmarks/run.php'
-      - 'benchmarks/projects/**'
-      - '.github/workflows/benchmarks.yml'
+      - 'benchmarks/Placement.php'
+      - 'benchmarks/placement.php'
+      - '.github/workflows/placement.yml'
   workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  benchmark:
+  placement:
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { name: 'Linux, ext4 (hard links)', os: ubuntu-latest, modes: '--mode=auto' }
-          - { name: 'Linux, Btrfs (reflinks)', os: ubuntu-latest, btrfs: true, modes: '--mode=auto --mode=hardlink' }
-          - { name: 'macOS, APFS (reflinks)', os: macos-latest, modes: '--mode=auto --mode=hardlink' }
+          - { name: 'macOS, APFS', os: macos-latest }
+          - { name: 'Linux, Btrfs', os: ubuntu-latest, btrfs: true }
+          - { name: 'Linux, ext4', os: ubuntu-latest }
     steps:
       - uses: actions/checkout@v4
       - uses: shivammathur/setup-php@v2
@@ -32,6 +31,7 @@ jobs:
           php-version: '8.4'
           coverage: none
           tools: composer:v2
+          extensions: ffi
       - name: Mount a Btrfs filesystem
         if: matrix.btrfs
         run: |
@@ -42,8 +42,10 @@ jobs:
           sudo mount -o loop "$RUNNER_TEMP/btrfs.img" /mnt/btrfs
           sudo chown "$(id -u):$(id -g)" /mnt/btrfs
           echo "BENCHMARK_DIR=/mnt/btrfs/benchmark" >> "$GITHUB_ENV"
-      - name: Run the benchmark
+      - name: Fill a store and a Composer cache
+        run: php benchmarks/run.php --work="${BENCHMARK_DIR:-$RUNNER_TEMP/benchmark}" --runs=1 > /dev/null
+      - name: Time the placement methods
         run: |
-          php benchmarks/run.php --work="${BENCHMARK_DIR:-$RUNNER_TEMP/benchmark}" --runs=3 ${{ matrix.modes }} \
-            | tee "$RUNNER_TEMP/results.md"
+          dir="${BENCHMARK_DIR:-$RUNNER_TEMP/benchmark}"
+          php benchmarks/placement.php --store="$dir/store-auto" --cache="$dir/cache/files" | tee "$RUNNER_TEMP/results.md"
           { echo "### ${{ matrix.name }}"; echo; cat "$RUNNER_TEMP/results.md"; } >> "$GITHUB_STEP_SUMMARY"
