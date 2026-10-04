@@ -1,7 +1,7 @@
 <?php
 
 /**
- * Usage: php benchmarks/placement.php --store=DIR --cache=DIR [--target=DIR] [--rounds=3]
+ * Usage: php benchmarks/run-placement.php --store=DIR --cache=DIR [--target=DIR] [--rounds=3]
  *
  * Times ways of putting package trees into vendor/, on the store and Composer cache of a run.php run.
  */
@@ -24,7 +24,7 @@ $options = getopt('', ['store:', 'cache:', 'target:', 'rounds:']);
 $store = $options['store'] ?? null;
 $cache = $options['cache'] ?? null;
 if (!is_string($store) || !is_string($cache)) {
-    fwrite(STDERR, "Usage: php benchmarks/placement.php --store=DIR --cache=DIR [--target=DIR] [--rounds=3]\n");
+    fwrite(STDERR, "Usage: php benchmarks/run-placement.php --store=DIR --cache=DIR [--target=DIR] [--rounds=3]\n");
     exit(1);
 }
 $target = is_string($options['target'] ?? null) ? $options['target'] : dirname($store) . '/placement';
