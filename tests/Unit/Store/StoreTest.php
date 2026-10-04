@@ -8,7 +8,7 @@ use Composer\Package\Package;
 use ComposerStore\Store\Store;
 use ComposerStore\Store\StoreEntry;
 use ComposerStore\Tests\Support\Files;
-use PHPUnit\Framework\Attributes\RequiresOperatingSystemFamily;
+use PHPUnit\Framework\Attributes\RequiresOperatingSystem;
 use PHPUnit\Framework\TestCase;
 
 final class StoreTest extends TestCase
@@ -116,7 +116,7 @@ final class StoreTest extends TestCase
         $this->assertFalse($entry->isValid());
     }
 
-    #[RequiresOperatingSystemFamily('Linux')]
+    #[RequiresOperatingSystem('Linux|Darwin')]
     public function testRemoveTreeDoesNotFollowSymlinks(): void
     {
         $outside = $this->root . '/outside';

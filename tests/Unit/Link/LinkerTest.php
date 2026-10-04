@@ -7,7 +7,7 @@ namespace ComposerStore\Tests\Unit\Link;
 use ComposerStore\Link\LinkException;
 use ComposerStore\Link\Linker;
 use ComposerStore\Tests\Support\Files;
-use PHPUnit\Framework\Attributes\RequiresOperatingSystemFamily;
+use PHPUnit\Framework\Attributes\RequiresOperatingSystem;
 use PHPUnit\Framework\TestCase;
 
 final class LinkerTest extends TestCase
@@ -54,22 +54,29 @@ final class LinkerTest extends TestCase
 
     public function testCopyPathsGetTheirOwnFile(): void
     {
-        chmod($this->source . '/bin/tool', 0755);
-
         (new Linker())->link($this->source, $this->target, ['./bin//tool']);
 
         $copy = $this->target . '/bin/tool';
         $this->assertNotSame(fileinode($this->source . '/bin/tool'), fileinode($copy));
         $this->assertFileEquals($this->source . '/bin/tool', $copy);
-        $this->assertSame(0755, fileperms($copy) & 0777);
         $this->assertSame(fileinode($this->source . '/src/Foo.php'), fileinode($this->target . '/src/Foo.php'));
+    }
 
+    #[RequiresOperatingSystem('Linux|Darwin')]
+    public function testCopiedFilesKeepTheirModeAndChmodStaysOnTheCopy(): void
+    {
+        chmod($this->source . '/bin/tool', 0755);
+
+        (new Linker())->link($this->source, $this->target, ['bin/tool']);
+
+        $copy = $this->target . '/bin/tool';
+        $this->assertSame(0755, fileperms($copy) & 0777);
         chmod($copy, 0700);
         clearstatcache();
         $this->assertSame(0755, fileperms($this->source . '/bin/tool') & 0777, 'chmod on the copy reached the source');
     }
 
-    #[RequiresOperatingSystemFamily('Linux')]
+    #[RequiresOperatingSystem('Linux|Darwin')]
     public function testSymlinksInsideThePackageAreKeptAsTheyAre(): void
     {
         symlink('src/Foo.php', $this->source . '/foo-link');

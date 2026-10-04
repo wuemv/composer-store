@@ -29,7 +29,8 @@ final class InstallTest extends IntegrationTestCase
 
         // __DIR__ in a linked file is the project's vendor/, not the store.
         $dir = $this->php($project, 'echo Acme\Alpha\Alpha::dir();');
-        $this->assertSame(realpath($project) . '/vendor/acme/alpha/src', $dir);
+        $expected = implode(DIRECTORY_SEPARATOR, [realpath($project), 'vendor', 'acme', 'alpha', 'src']);
+        $this->assertSame($expected, $dir);
     }
 
     public function testASecondProjectLinksTheSameFilesFromTheStore(): void
@@ -86,7 +87,9 @@ final class InstallTest extends IntegrationTestCase
         $this->assertLinkedFromStore($project, 'acme/beta', '1.0.0', copied: ['bin/beta']);
         $storeCopy = $this->storeEntry('acme/beta', '1.0.0') . '/files/bin/beta';
         $this->assertSame(0, fileperms($storeCopy) & 0111, 'Composer made the store copy executable');
-        $this->assertTrue(is_executable($project . '/vendor/acme/beta/bin/beta'));
+        if (PHP_OS_FAMILY !== 'Windows') {
+            $this->assertTrue(is_executable($project . '/vendor/acme/beta/bin/beta'));
+        }
 
         $result = Process::run([PHP_BINARY, 'vendor/bin/beta'], $project, Process::environmentWithoutComposer());
         $this->assertSame("beta runs with alpha 2.0.0\n", $result->stdout, $result->describe());
