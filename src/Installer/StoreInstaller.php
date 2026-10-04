@@ -36,7 +36,6 @@ use React\Promise\PromiseInterface;
 final class StoreInstaller extends LibraryInstaller
 {
     private const ARCHIVE_TYPES = ['zip', 'tar'];
-    private const DEFAULT_LOCK_TIMEOUT = 60.0;
 
     private readonly DownloadManager $downloads;
 
@@ -329,6 +328,7 @@ final class StoreInstaller extends LibraryInstaller
         if (!$this->lockStore($root)) {
             return false;
         }
+        $this->registerProject();
 
         $this->readOnly = $this->config->readOnly;
         if ($this->readOnly && PHP_OS_FAMILY === 'Windows') {
@@ -345,26 +345,34 @@ final class StoreInstaller extends LibraryInstaller
      */
     private function lockStore(string $root): bool
     {
-        if ($this->lock->acquireShared(0)) {
+        $timeout = StoreLock::timeout();
+        $waiting = function () use ($timeout): void {
+            $message = sprintf('composer-store: waiting up to %g seconds for the store lock', $timeout);
+            $this->io->writeError('<info>' . $message . '</info>');
+        };
+        if ($this->lock->acquireShared($timeout, $waiting)) {
             return true;
         }
-
-        $timeout = self::lockTimeout();
-        $message = sprintf('composer-store: waiting up to %d seconds for the store lock', $timeout);
-        $this->io->writeError('<info>' . $message . '</info>');
-        if ($this->lock->acquireShared($timeout)) {
-            return true;
-        }
-        $this->warn(sprintf('could not lock the store (%s), installing packages without the store', $root));
+        $this->warn(sprintf(
+            'could not lock the store at %s (%s), installing packages without the store',
+            $root,
+            $this->lock->failure()
+        ));
 
         return false;
     }
 
-    private static function lockTimeout(): float
+    /**
+     * Records the project in projects.json for store:prune. Best effort: without it, prune still sees
+     * the project's hard links.
+     */
+    private function registerProject(): void
     {
-        $value = $_SERVER['COMPOSER_STORE_LOCK_TIMEOUT'] ?? getenv('COMPOSER_STORE_LOCK_TIMEOUT');
-
-        return is_numeric($value) && $value >= 0 ? (float) $value : self::DEFAULT_LOCK_TIMEOUT;
+        try {
+            $this->store->projects()->register($this->projectDir(), $this->vendorDir);
+        } catch (StoreException $e) {
+            $this->io->writeError('    composer-store: ' . $e->getMessage(), true, IOInterface::VERBOSE);
+        }
     }
 
     /**

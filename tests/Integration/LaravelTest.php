@@ -63,6 +63,14 @@ final class LaravelTest extends TestCase
         $this->assertGreaterThan(50, substr_count($output, 'Linking from store'));
         $this->assertSame(fileinode($framework), fileinode(str_replace($app, $second, $framework)));
         $this->assertChecksPass($second);
+
+        // The store's own commands agree: every entry is intact, shared by both apps, and in use.
+        $verify = $this->composer($second, 'store:verify');
+        $this->assertMatchesRegularExpression('{Verified \d+ entries: \d+ ok, 0 changed, 0 invalid\n}', $verify);
+        $status = $this->composer($second, 'store:status');
+        $this->assertMatchesRegularExpression('{^Projects: +2 projects registered$}m', $status);
+        $this->assertMatchesRegularExpression('{^This project: +links from the store$}m', $status);
+        $this->assertStringContainsString('Nothing to prune', $this->composer($second, 'store:prune'));
     }
 
     /**

@@ -8,6 +8,7 @@ use Composer\Package\Package;
 use ComposerStore\Store\PublishResult;
 use ComposerStore\Store\Store;
 use ComposerStore\Store\StoreEntry;
+use ComposerStore\Store\StoreException;
 use ComposerStore\Store\TreeHasher;
 use ComposerStore\Tests\Support\Files;
 use PHPUnit\Framework\Attributes\RequiresOperatingSystem;
@@ -173,6 +174,64 @@ final class StoreTest extends TestCase
         $this->assertSame(0555, fileperms($entry->filesDir() . '/bin/tool') & 0777);
         $this->assertTrue(is_writable($entry->filesDir() . '/bin'), 'directories must stay writable');
         $this->assertSame($treeHash, (StoreEntry::readMeta($entry->path) ?? [])['tree_hash'] ?? null);
+    }
+
+    public function testEntriesListsEveryEntryFromItsMetadata(): void
+    {
+        $store = new Store($this->root);
+        $foo = $this->entry('acme/foo', '1.0.0', self::REFERENCE);
+        $store->publish($this->prepare($store, 'foo'), $foo, self::meta() + ['version' => '1.0.0']);
+        $broken = $this->root . '/packages/acme/bar/1.0.0-abcdef012345';
+        Files::makeDir($broken . '/files');
+
+        $entries = $store->entries();
+
+        $this->assertCount(2, $entries);
+        [$bar, $listedFoo] = $entries;
+        $this->assertSame([$broken, 'acme/bar', '', ''], [$bar->path, $bar->name, $bar->version, $bar->reference]);
+        $this->assertEquals($foo, $listedFoo);
+    }
+
+    public function testTempDirsListsTheDirectoriesInTmp(): void
+    {
+        $store = new Store($this->root);
+        $this->assertSame([], $store->tempDirs());
+
+        $temp = $store->createTempDir();
+        touch($this->root . '/tmp/stray-file');
+
+        $this->assertSame([$temp], $store->tempDirs());
+    }
+
+    public function testRemoveEntryDeletesItAndTheDirectoriesItEmpties(): void
+    {
+        $store = new Store($this->root);
+        $first = $this->entry('acme/foo', '1.0.0', self::REFERENCE);
+        $second = $this->entry('acme/foo', '2.0.0', self::REFERENCE);
+        $store->publish($this->prepare($store, 'first'), $first, self::meta());
+        $store->publish($this->prepare($store, 'second'), $second, self::meta());
+        Files::makeDir($this->root . '/vendor');
+        link($first->filesDir() . '/content.txt', $this->root . '/vendor/content.txt');
+
+        $store->removeEntry($first);
+
+        $this->assertDirectoryDoesNotExist($first->path);
+        $this->assertDirectoryExists($second->path);
+        $this->assertSame([], $store->tempDirs(), 'the entry is deleted from tmp/');
+        $this->assertSame('first', file_get_contents($this->root . '/vendor/content.txt'), 'links keep their data');
+
+        $store->removeEntry($second);
+
+        $this->assertDirectoryDoesNotExist($this->root . '/packages/acme');
+        $this->assertDirectoryExists($this->root . '/packages');
+    }
+
+    public function testRemovingAnEntryThatIsGoneFails(): void
+    {
+        $store = new Store($this->root);
+
+        $this->expectException(StoreException::class);
+        $store->removeEntry($this->entry('acme/foo', '1.0.0', self::REFERENCE));
     }
 
     #[RequiresOperatingSystem('Linux|Darwin')]

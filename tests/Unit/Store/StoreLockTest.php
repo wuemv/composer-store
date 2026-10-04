@@ -90,7 +90,43 @@ final class StoreLockTest extends TestCase
 
     public function testALockFileThatCannotBeCreatedIsNotAcquired(): void
     {
-        $this->assertFalse((new StoreLock($this->dir . '/missing/.lock'))->acquireShared(0));
+        $lock = new StoreLock($this->dir . '/missing/.lock');
+
+        $this->assertFalse($lock->acquireShared(0));
+        $this->assertStringStartsWith('cannot open ' . $this->dir . '/missing/.lock', (string) $lock->failure());
+    }
+
+    public function testFailureSaysWhyTheLockWasNotAcquired(): void
+    {
+        $maintenance = new StoreLock($this->file);
+        $install = new StoreLock($this->file);
+        $this->assertTrue($maintenance->acquireExclusive(0));
+        $this->assertNull($maintenance->failure());
+
+        $this->assertFalse($install->acquireShared(0));
+        $this->assertSame('another process holds it', $install->failure());
+        $this->assertFalse($install->acquireShared(0.2));
+        $this->assertSame('another process held it for 0.2 seconds', $install->failure());
+
+        $maintenance->release();
+        $this->assertTrue($install->acquireShared(0));
+        $this->assertNull($install->failure());
+    }
+
+    public function testTheWaitCallbackRunsOnceAndOnlyWhenTheLockIsBusy(): void
+    {
+        $calls = 0;
+        $onWait = static function () use (&$calls): void {
+            $calls++;
+        };
+        $maintenance = new StoreLock($this->file);
+        $this->assertTrue($maintenance->acquireExclusive(0, $onWait));
+        $this->assertSame(0, $calls);
+
+        $this->assertFalse((new StoreLock($this->file))->acquireShared(0.3, $onWait));
+        $this->assertSame(1, $calls);
+        $this->assertFalse((new StoreLock($this->file))->acquireShared(0, $onWait));
+        $this->assertSame(1, $calls, 'without a timeout, nothing waits');
     }
 
     public function testTheLockCannotBeTakenTwiceByTheSameObject(): void

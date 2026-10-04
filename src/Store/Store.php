@@ -8,7 +8,7 @@ use Composer\Package\PackageInterface;
 
 /**
  * The global store: one directory per package version, shared by every project on the machine.
- * Project operations only ever add entries; nothing here deletes one.
+ * Project operations only ever add entries. Only store:prune deletes them, under the exclusive lock.
  */
 final class Store
 {
@@ -27,6 +27,14 @@ final class Store
     public function lock(): StoreLock
     {
         return new StoreLock($this->root . '/.lock');
+    }
+
+    /**
+     * The projects that have linked from this store.
+     */
+    public function projects(): ProjectRegistry
+    {
+        return new ProjectRegistry($this->root . '/projects.json');
     }
 
     /**
@@ -55,15 +63,81 @@ final class Store
         if ($reference === null || $reference === '') {
             return null;
         }
-        $path = sprintf(
-            '%s/packages/%s/%s-%s',
-            $this->root,
-            $package->getName(),
-            self::slug($package->getPrettyVersion()),
-            self::shortReference($reference)
-        );
+        $path = $this->entryPath($package->getName(), $package->getPrettyVersion(), $reference);
 
         return new StoreEntry($path, $package->getName(), $package->getPrettyVersion(), $reference);
+    }
+
+    /**
+     * Where the entry for a package version lives: packages/<vendor>/<name>/<version>-<reference-short>.
+     */
+    public function entryPath(string $name, string $prettyVersion, string $reference): string
+    {
+        return sprintf(
+            '%s/packages/%s/%s-%s',
+            $this->root,
+            strtolower($name),
+            self::slug($prettyVersion),
+            self::shortReference($reference)
+        );
+    }
+
+    /**
+     * Every entry directory in the store, described by its metadata. An entry whose metadata is
+     * missing or unreadable is listed too, with an empty version and reference: it is not valid.
+     *
+     * @return list<StoreEntry>
+     */
+    public function entries(): array
+    {
+        $entries = [];
+        foreach (self::subdirectories($this->root . '/packages') as $vendor) {
+            foreach (self::subdirectories($vendor) as $package) {
+                $name = basename($vendor) . '/' . basename($package);
+                foreach (self::subdirectories($package) as $dir) {
+                    $meta = StoreEntry::readMeta($dir) ?? [];
+                    $version = is_string($meta['version'] ?? null) ? $meta['version'] : '';
+                    $reference = is_string($meta['reference'] ?? null) ? $meta['reference'] : '';
+                    $entries[] = new StoreEntry($dir, $name, $version, $reference);
+                }
+            }
+        }
+
+        return $entries;
+    }
+
+    /**
+     * Temp dirs left by installs that were interrupted before publishing their entry.
+     *
+     * @return list<string>
+     */
+    public function tempDirs(): array
+    {
+        return self::subdirectories($this->root . '/tmp');
+    }
+
+    /**
+     * Deletes an entry, and the vendor and name directories it leaves empty. The entry first moves to
+     * tmp/ in one rename, so a delete that is interrupted never leaves a partial entry for installs to
+     * link: what remains in tmp/ goes on the next prune. Hard links to the entry's files keep working,
+     * since a file's data stays until its last link is gone.
+     */
+    public function removeEntry(StoreEntry $entry): void
+    {
+        $trash = $this->newTempPath();
+        if (!@rename($entry->path, $trash)) {
+            throw new StoreException(sprintf('Cannot move %s to %s: %s', $entry->path, $trash, self::lastError()));
+        }
+        $parent = dirname($entry->path);
+        foreach ([$parent, dirname($parent)] as $dir) {
+            if (is_dir($dir) && (scandir($dir) ?: []) === ['.', '..']) {
+                @rmdir($dir);
+            }
+        }
+        self::removeTree($trash);
+        if (file_exists($trash)) {
+            throw new StoreException(sprintf('Cannot delete all of %s (it was %s)', $trash, $entry->path));
+        }
     }
 
     /**
@@ -71,11 +145,7 @@ final class Store
      */
     public function createTempDir(): string
     {
-        $parent = $this->root . '/tmp';
-        self::ensureDir($parent);
-        do {
-            $dir = $parent . '/' . bin2hex(random_bytes(8));
-        } while (file_exists($dir));
+        $dir = $this->newTempPath();
         if (!@mkdir($dir)) {
             throw new StoreException('Cannot create ' . $dir . ': ' . self::lastError());
         }
@@ -163,6 +233,35 @@ final class Store
             }
         }
         @rmdir($dir);
+    }
+
+    /**
+     * A path in tmp/ that does not exist yet.
+     */
+    private function newTempPath(): string
+    {
+        $parent = $this->root . '/tmp';
+        self::ensureDir($parent);
+        do {
+            $path = $parent . '/' . bin2hex(random_bytes(8));
+        } while (file_exists($path));
+
+        return $path;
+    }
+
+    /**
+     * @return list<string> full paths, sorted
+     */
+    private static function subdirectories(string $dir): array
+    {
+        $dirs = [];
+        foreach (@scandir($dir) ?: [] as $name) {
+            if ($name !== '.' && $name !== '..' && is_dir($dir . '/' . $name) && !is_link($dir . '/' . $name)) {
+                $dirs[] = $dir . '/' . $name;
+            }
+        }
+
+        return $dirs;
     }
 
     private static function slug(string $version): string

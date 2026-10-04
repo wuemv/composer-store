@@ -45,7 +45,7 @@ $COMPOSER_STORE_DIR (default: $COMPOSER_HOME/store)
     files/                  # the package exactly as Composer extracts it; this is what gets linked
     .store-meta.json        # name, version, full reference, tree hash, created_at, source dist url
   tmp/                      # entries are built here, then renamed into packages/ in one step
-  projects.json             # absolute paths of projects using the store
+  projects.json             # projects that linked from the store, with their vendor dir (read by store:prune)
   .lock
 ```
 
@@ -56,6 +56,8 @@ Concurrency:
 - Installs hold `.lock` **shared** for the whole run, so they never wait for each other. Anything that deletes from the store (prune) must hold it **exclusively**, so it never removes an entry an install is about to link. An install waits up to `COMPOSER_STORE_LOCK_TIMEOUT` seconds (default 60) for an exclusive holder, then installs without the store.
 - Adding an entry is one `rename()` of a complete temp dir. If another install published the same entry first, the loser uses it when the tree hashes match, and otherwise installs its own extraction without the store.
 - There is deliberately no blocking per-entry lock: Composer extracts packages concurrently inside one process, so two installs each holding one entry while waiting for the other's would deadlock.
+- `store:verify` holds `.lock` shared. `store:prune --force` holds it exclusively, plans only once it has it, and deletes an entry by first renaming it into `tmp/`, so an interrupted prune never leaves a partial entry for an install to link.
+- `projects.json` is a read-modify-write under its own `projects.json.lock`, replaced with an atomic rename. Installs register their project after taking the store lock, best effort.
 
 Implementation outline:
 
@@ -125,6 +127,13 @@ Via `CommandProvider`:
 - `composer store:status`: store path, size, package count, estimated disk saved.
 - `composer store:verify`: re-hash store entries, report corruption.
 - `composer store:prune`: remove unused entries. Hardlink mode: a file with link count 1 is unused. Other modes: scan projects in `projects.json` and their `vendor/composer/installed.json`. Default to dry-run, require `--force` to delete.
+
+As built:
+
+- All three take `--format=text|json` (JSON keys are kebab-case, like Composer's own JSON output), print results on stdout, and work outside a project too. Inside one, `store:status` also says whether that project links from the store and why not.
+- Disk saved = for each store file, size on disk × (link count − 1): what the `vendor/` links would take as copies.
+- `store:verify [packages...]` (names, `*` wildcard) exits 1 when an entry is changed (files differ from the tree hash; files modified after `created_at` are listed) or invalid (missing `files/` or metadata, or metadata for another key). Entries without a tree hash are counted, and listed with `-v`. Repair: delete the entry, then `composer reinstall <package>` in each project using it.
+- `store:prune` works per entry, not per file: an entry is in use while any of its files has a link count above 1 (a package's `bin` files are copies, so they cannot count), or while a registered project's `installed.json` lists that name, version and dist reference. Both rules always apply, so a project that copied (or, later, reflinked) keeps its entries. It also deletes `tmp/` leftovers and forgets registered projects whose directory is gone. With `--force` it waits up to `COMPOSER_STORE_LOCK_TIMEOUT` for running installs, then gives up without deleting anything (exit 1).
 
 ### Phase 4: Reflinks + cross-platform
 

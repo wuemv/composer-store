@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace ComposerStore\Installer;
 
 use Composer\Package\PackageInterface;
+use ComposerStore\NamePatterns;
 
 /**
  * Packages that must be installed by Composer as usual even though they could be linked: the ones
@@ -12,8 +13,7 @@ use Composer\Package\PackageInterface;
  */
 final class SkipRules
 {
-    /** @var list<string> */
-    private readonly array $excludePatterns;
+    private readonly NamePatterns $exclude;
 
     /**
      * @param list<string>        $exclude package names; `*` matches any characters
@@ -21,10 +21,7 @@ final class SkipRules
      */
     public function __construct(array $exclude, private readonly array $patched)
     {
-        $this->excludePatterns = array_map(
-            static fn (string $name): string => '{^' . str_replace('\*', '.*', preg_quote(strtolower($name))) . '$}',
-            $exclude
-        );
+        $this->exclude = new NamePatterns($exclude);
     }
 
     /**
@@ -32,13 +29,10 @@ final class SkipRules
      */
     public function reason(PackageInterface $package): ?string
     {
-        $name = strtolower($package->getName());
-        foreach ($this->excludePatterns as $pattern) {
-            if (preg_match($pattern, $name) === 1) {
-                return 'excluded in extra.composer-store.exclude';
-            }
+        if ($this->exclude->matches($package->getName())) {
+            return 'excluded in extra.composer-store.exclude';
         }
-        if (isset($this->patched[$name])) {
+        if (isset($this->patched[strtolower($package->getName())])) {
             return 'patched by a patches plugin';
         }
 

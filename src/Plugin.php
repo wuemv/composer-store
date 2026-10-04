@@ -6,11 +6,14 @@ namespace ComposerStore;
 
 use Composer\Composer;
 use Composer\IO\IOInterface;
+use Composer\Plugin\Capability\CommandProvider as CommandProviderCapability;
+use Composer\Plugin\Capable;
 use Composer\Plugin\PluginInterface;
+use ComposerStore\Command\CommandProvider;
 use ComposerStore\Installer\StoreInstaller;
 use ComposerStore\Store\Store;
 
-final class Plugin implements PluginInterface
+final class Plugin implements PluginInterface, Capable
 {
     private ?StoreInstaller $installer = null;
 
@@ -36,5 +39,13 @@ final class Plugin implements PluginInterface
 
     public function uninstall(Composer $composer, IOInterface $io): void
     {
+    }
+
+    /**
+     * @return array<class-string, class-string>
+     */
+    public function getCapabilities(): array
+    {
+        return [CommandProviderCapability::class => CommandProvider::class];
     }
 }
