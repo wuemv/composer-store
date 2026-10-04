@@ -11,7 +11,7 @@ PHP still sees ordinary files inside `vendor/`: `__DIR__`, relative includes, au
 - Composer 2.0 or later. Tested with 2.0, 2.2, 2.8 and 2.10.
 - PHP 8.1 or later.
 - Linux, macOS or Windows.
-- On macOS, PHP's FFI extension, so the plugin can clone each package with one `clonefile(2)` call. Without it, the plugin runs `cp` for each package, and installs from a warm store took about 50% longer than without the plugin, where with it they take from 10% less to 15% more. `php -m` lists `FFI` when you have it; PHP allows it on the command line by default.
+- On macOS, PHP's FFI extension, so the plugin can clone each package with one `clonefile(2)` call. Without it, the plugin runs `cp` for each package, which places the files ten times slower: 2.3 s instead of 0.23 s for the 148 packages of the benchmarks. `php -m` lists `FFI` when you have it; PHP allows it on the command line by default.
 - The store and your projects on the same filesystem, since links cannot cross filesystems. Elsewhere, Composer installs as usual, with a warning.
 
 ## Install
@@ -55,7 +55,7 @@ You can also require it in a single project (`composer require wuemv/composer-st
 
 ## How it works
 
-Composer still resolves dependencies, writes the lock file and downloads archives into its cache as usual. The plugin only replaces the step that puts a package's files into `vendor/<package>`:
+Composer still resolves dependencies, writes the lock file and downloads archives into its cache as usual. The plugin replaces the step that puts a package's files into `vendor/<package>`, and leaves out the download when the store already holds that version:
 
 1. The store key is the package name, version and `dist.reference` (usually a commit hash).
 2. If the store does not hold that version yet, the archive is extracted into a temp dir in the store, hashed, and renamed into place in one step.
@@ -166,14 +166,14 @@ Then delete the store, `$COMPOSER_HOME/store` or your `COMPOSER_STORE_DIR`. Dele
 - The store must be on the same filesystem as `vendor/`. On Btrfs, subvolumes count as separate filesystems. In a container, a project in a bind mount is on another filesystem than the container's Composer home: point `COMPOSER_STORE_DIR` at a directory on the project's filesystem.
 - Windows has hard links only: Dev Drive and ReFS block cloning are not used. `read-only` is ignored on Windows, where a read-only file cannot be deleted.
 - Filesystems limit the links to one file (65,000 on ext4, 1,023 on NTFS). Past that, the package is copied, with a warning.
-- Installs are not always faster than without the plugin. From a warm store, they took from 17% less to 11% more time on Linux, depending on the machine and filesystem: where creating files is cheap, as on ext4, and CPUs are many, Composer's own extraction is about as fast as linking. On macOS they took from 10% less to 15% more: generating an optimized autoloader reads every class file, and a cloned file is read from disk the first time, where a freshly unzipped one is still in memory. See the benchmarks.
+- Filling the store takes time: a version installed for the first time is extracted into the store, then linked. In the benchmarks, the first project installed into an empty store took from 28% longer to two and a half times as long as without the plugin. Installs from a warm store took 3 to 33% less time, except with hard links on macOS, which took 15 to 36% more: APFS is slow at making hard links, so `auto` clones there.
 - `store:prune` keeps a version while any registered project lists it, including projects that no longer use the plugin, until their directory is deleted.
 - Composer's own cache still holds the downloaded archives: `composer clear-cache` frees it.
 - One store shared by several users of a machine is not supported.
 
 ## Benchmarks
 
-Five Laravel projects (Laravel 11, 12 and 13, two with extra packages) install 556 packages, 148 different ones. With the plugin they take about half to two thirds less disk space, store included. Installing them from a warm store takes from 17% less to 11% more time than without the plugin on Linux, depending on the machine and filesystem, and from 10% less to 15% more on macOS.
+Five Laravel projects (Laravel 11, 12 and 13, two with extra packages) install 556 packages, 148 different ones. With the plugin they take about half to two thirds less disk space, store included. Installing them from a warm store took 3 to 27% less time than without the plugin on Linux, depending on the machine and filesystem, and 27 to 33% less on macOS.
 
 [benchmarks/RESULTS.md](benchmarks/RESULTS.md) has the numbers for Linux (ext4 and Btrfs) and macOS, and [benchmarks/](benchmarks/) explains how to run the benchmark.
 
