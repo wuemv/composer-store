@@ -7,13 +7,24 @@ namespace ComposerStore\Tests\Support;
 final class Process
 {
     /**
-     * Runs a command without a shell. Output goes through temp files rather than pipes: Composer writes
-     * most of its output to stderr, and draining two pipes one after the other can deadlock.
+     * Runs a command without a shell and waits for it.
      *
      * @param list<string>          $command
      * @param array<string, string> $env     the complete environment of the process
      */
     public static function run(array $command, string $cwd, array $env): ProcessResult
+    {
+        return self::start($command, $cwd, $env)->wait();
+    }
+
+    /**
+     * Starts a command without a shell. Output goes through temp files rather than pipes: Composer
+     * writes most of its output to stderr, and draining two pipes one after the other can deadlock.
+     *
+     * @param list<string>          $command
+     * @param array<string, string> $env     the complete environment of the process
+     */
+    public static function start(array $command, string $cwd, array $env): RunningProcess
     {
         $stdout = Files::tempFile('stdout');
         $stderr = Files::tempFile('stderr');
@@ -26,14 +37,8 @@ final class Process
         if (!is_resource($process)) {
             throw new \RuntimeException('Cannot start ' . implode(' ', $command));
         }
-        $exitCode = proc_close($process);
 
-        $output = (string) file_get_contents($stdout);
-        $errors = (string) file_get_contents($stderr);
-        @unlink($stdout);
-        @unlink($stderr);
-
-        return new ProcessResult($command, $exitCode, $output, $errors);
+        return new RunningProcess($process, $command, $stdout, $stderr);
     }
 
     /**

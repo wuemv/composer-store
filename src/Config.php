@@ -9,19 +9,22 @@ use Composer\Json\JsonFile;
 use Composer\Util\Filesystem;
 
 /**
- * Plugin settings from `extra.composer-store` in the global composer.json ($COMPOSER_HOME),
- * overridden key by key by the project's composer.json.
+ * Plugin settings from `extra.composer-store` in the global composer.json ($COMPOSER_HOME) and in the
+ * project's composer.json. The project wins key by key, except `exclude`: both lists apply.
  */
 final class Config
 {
     public const EXTRA_KEY = 'composer-store';
 
     /**
+     * @param list<string> $exclude  lower-cased package names; `*` matches any characters
      * @param list<string> $warnings problems found in the settings, already resolved to a default
      */
     public function __construct(
         public readonly Mode $mode,
         public readonly string $storeDir,
+        public readonly array $exclude = [],
+        public readonly bool $readOnly = false,
         public readonly array $warnings = [],
     ) {
     }
@@ -44,6 +47,7 @@ final class Config
     public static function fromSettings(array $layers, string $storeDir, array $warnings = []): self
     {
         $settings = [];
+        $exclude = [];
         foreach ($layers as $layer) {
             if ($layer === null) {
                 continue;
@@ -51,6 +55,9 @@ final class Config
             if (!is_array($layer)) {
                 $warnings[] = 'extra.' . self::EXTRA_KEY . ' must be an object, ignoring it';
                 continue;
+            }
+            if (array_key_exists('exclude', $layer)) {
+                $exclude = array_merge($exclude, self::parseExclude($layer['exclude'], $warnings));
             }
             $settings = array_replace($settings, $layer);
         }
@@ -67,7 +74,17 @@ final class Config
             $mode = $parsed ?? Mode::Auto;
         }
 
-        return new self($mode, $storeDir, $warnings);
+        $readOnly = false;
+        if (array_key_exists('read-only', $settings)) {
+            $parsed = self::parseBool($settings['read-only']);
+            if ($parsed === null) {
+                $value = json_encode($settings['read-only']);
+                $warnings[] = sprintf('read-only must be true or false, not %s; using false', $value);
+            }
+            $readOnly = $parsed ?? false;
+        }
+
+        return new self($mode, $storeDir, array_values(array_unique($exclude)), $readOnly, $warnings);
     }
 
     /**
@@ -85,6 +102,46 @@ final class Config
         $cwd = getcwd();
 
         return ($cwd === false ? '.' : $cwd) . '/' . $dir;
+    }
+
+    /**
+     * @param list<string> $warnings
+     *
+     * @return list<string>
+     */
+    private static function parseExclude(mixed $value, array &$warnings): array
+    {
+        if (!is_array($value)) {
+            $warnings[] = 'exclude must be a list of package names, ignoring it';
+
+            return [];
+        }
+        $names = [];
+        foreach ($value as $name) {
+            if (is_string($name) && trim($name) !== '') {
+                $names[] = strtolower(trim($name));
+            } else {
+                $warnings[] = sprintf('ignoring exclude entry %s, expected a package name', json_encode($name));
+            }
+        }
+
+        return $names;
+    }
+
+    /**
+     * Booleans, plus the strings `composer config` writes without --json.
+     */
+    private static function parseBool(mixed $value): ?bool
+    {
+        if (is_bool($value)) {
+            return $value;
+        }
+
+        return match (is_string($value) ? strtolower(trim($value)) : $value) {
+            'true', '1', 'yes', 'on', 1 => true,
+            'false', '0', 'no', 'off', '', 0 => false,
+            default => null,
+        };
     }
 
     /**

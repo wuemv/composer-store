@@ -1,0 +1,9 @@
+--- a/src/Gamma.php
++++ b/src/Gamma.php
+@@ -4,5 +4,5 @@
+ 
+ final class Gamma
+ {
+-    public const NAME = 'gamma';
++    public const NAME = 'patched gamma';
+ }

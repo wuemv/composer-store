@@ -51,6 +51,12 @@ $COMPOSER_STORE_DIR (default: $COMPOSER_HOME/store)
 
 `<reference-short>` is the first 12 characters of a commit hash, or a hash of the reference when it is not one. The full reference is in `.store-meta.json` and is checked before an entry is used. Package files live in `files/` so the metadata never mixes with them and an entry appears with a single `rename()`.
 
+Concurrency:
+
+- Installs hold `.lock` **shared** for the whole run, so they never wait for each other. Anything that deletes from the store (prune) must hold it **exclusively**, so it never removes an entry an install is about to link. An install waits up to `COMPOSER_STORE_LOCK_TIMEOUT` seconds (default 60) for an exclusive holder, then installs without the store.
+- Adding an entry is one `rename()` of a complete temp dir. If another install published the same entry first, the loser uses it when the tree hashes match, and otherwise installs its own extraction without the store.
+- There is deliberately no blocking per-entry lock: Composer extracts packages concurrently inside one process, so two installs each holding one entry while waiting for the other's would deadlock.
+
 Implementation outline:
 
 - `composer.json`: `"type": "composer-plugin"`, requires `composer-plugin-api: ^2.0`, PHP 8.1+.
@@ -64,7 +70,7 @@ Packages that must be **copied, not linked** (skip rules):
 
 - source installs (`--prefer-source`, git clones, `dist` missing)
 - `path` repositories
-- packages patched via `cweagans/composer-patches` (check `extra.patches` in root package)
+- packages patched via `cweagans/composer-patches`: targets of the root `extra.patches`, of `extra.patches-file` (1.x), of `extra.composer-patches.patches-file` or `patches.json` and `patches.lock.json` (2.x), and of any dependency's `extra.patches`
 - anything in the user's `exclude` list
 
 Config (root `composer.json` `extra`, also readable from global Composer config):
@@ -80,6 +86,10 @@ Config (root `composer.json` `extra`, also readable from global Composer config)
 ```
 
 `mode`: `auto` | `reflink` | `hardlink` | `copy`. `auto` picks reflink if supported, else hardlink if store and project share a filesystem (compare device IDs), else copy with a warning.
+
+`exclude`: package names, `*` matches any characters. The global and project lists are combined; other keys from the project replace the global ones.
+
+`read-only`: removes the write bits of store files, so editing a linked file in `vendor/` fails. Hard links share permissions, so it applies to every project linking those versions, and existing entries become read-only when a read-only project links them. Root ignores file permissions. Not supported on Windows yet (a read-only file cannot be deleted there): ignored with a warning. Turning it off does not restore write bits; `chmod -R u+w "$COMPOSER_STORE_DIR/packages"` does.
 
 ## Phases
 

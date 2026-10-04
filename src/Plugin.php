@@ -28,6 +28,7 @@ final class Plugin implements PluginInterface
     public function deactivate(Composer $composer, IOInterface $io): void
     {
         if ($this->installer !== null) {
+            $this->installer->releaseStore();
             $composer->getInstallationManager()->removeInstaller($this->installer);
             $this->installer = null;
         }

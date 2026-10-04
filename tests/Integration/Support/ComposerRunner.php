@@ -6,6 +6,7 @@ namespace ComposerStore\Tests\Integration\Support;
 
 use ComposerStore\Tests\Support\Process;
 use ComposerStore\Tests\Support\ProcessResult;
+use ComposerStore\Tests\Support\RunningProcess;
 
 /**
  * Runs the Composer binary under test: $COMPOSER_STORE_TEST_COMPOSER, or `composer` from the PATH.
@@ -40,6 +41,17 @@ final class ComposerRunner
      */
     public function run(string $cwd, array $args, array $env, bool $network = false): ProcessResult
     {
+        return $this->start($cwd, $args, $env, $network)->wait();
+    }
+
+    /**
+     * Like run(), without waiting for Composer to finish.
+     *
+     * @param list<string>          $args
+     * @param array<string, string> $env
+     */
+    public function start(string $cwd, array $args, array $env, bool $network = false): RunningProcess
+    {
         $env += [
             'COMPOSER_ALLOW_SUPERUSER' => '1',
             'COMPOSER_NO_INTERACTION' => '1',
@@ -56,7 +68,7 @@ final class ComposerRunner
         }
         $command = [...$this->command, ...$args, '--no-ansi'];
 
-        return Process::run($command, $cwd, $env + $inherited);
+        return Process::start($command, $cwd, $env + $inherited);
     }
 
     private static function findInPath(string $name): string

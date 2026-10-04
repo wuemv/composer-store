@@ -9,6 +9,7 @@ use Composer\DependencyResolver\Operation\InstallOperation;
 use Composer\DependencyResolver\Operation\UpdateOperation;
 use Composer\Downloader\ArchiveDownloader;
 use Composer\Downloader\DownloadManager;
+use Composer\Factory;
 use Composer\Installer\LibraryInstaller;
 use Composer\IO\IOInterface;
 use Composer\Package\PackageInterface;
@@ -16,15 +17,18 @@ use ComposerStore\Config;
 use ComposerStore\Link\LinkException;
 use ComposerStore\Link\Linker;
 use ComposerStore\Mode;
+use ComposerStore\Store\PublishResult;
 use ComposerStore\Store\Store;
 use ComposerStore\Store\StoreEntry;
 use ComposerStore\Store\StoreException;
+use ComposerStore\Store\StoreLock;
 use React\Promise\PromiseInterface;
 
 /**
  * Installs `library` packages from the store: a version is extracted into the store once, and each
  * project's vendor/ gets hard links to it. Anything else (source installs, path repositories,
- * non-archive dists, store on another filesystem) is left to Composer's normal install.
+ * non-archive dists, excluded or patched packages, store on another filesystem) is left to
+ * Composer's normal install.
  *
  * Composer still downloads the archive first: its download step decides between dist and source,
  * and that decision is only visible afterwards, through the package's installation source.
@@ -32,10 +36,20 @@ use React\Promise\PromiseInterface;
 final class StoreInstaller extends LibraryInstaller
 {
     private const ARCHIVE_TYPES = ['zip', 'tar'];
+    private const DEFAULT_LOCK_TIMEOUT = 60.0;
 
     private readonly DownloadManager $downloads;
 
+    /** Read when needed: Composer 2.0 activates plugins before it attaches the locker. */
+    private readonly Composer $project;
+
+    private readonly StoreLock $lock;
+
     private ?bool $storeUsable = null;
+
+    private bool $readOnly = false;
+
+    private ?SkipRules $skipRules = null;
 
     public function __construct(
         IOInterface $io,
@@ -46,6 +60,16 @@ final class StoreInstaller extends LibraryInstaller
     ) {
         parent::__construct($io, $composer, 'library');
         $this->downloads = $composer->getDownloadManager();
+        $this->project = $composer;
+        $this->lock = $store->lock();
+    }
+
+    /**
+     * Lets go of the store lock this run holds, if any.
+     */
+    public function releaseStore(): void
+    {
+        $this->lock->release();
     }
 
     /**
@@ -99,6 +123,10 @@ final class StoreInstaller extends LibraryInstaller
 
         if ($entry->isValid()) {
             $this->io->writeError(sprintf('  - %s: Linking from store', $operation));
+            if ($this->readOnly) {
+                // The entry may predate read-only mode.
+                Store::makeReadOnly($entry->filesDir());
+            }
             $this->place($package, $entry, $path);
 
             return \React\Promise\resolve(null);
@@ -106,11 +134,7 @@ final class StoreInstaller extends LibraryInstaller
 
         if ($entry->exists()) {
             // Same key, different content (or unreadable metadata): leave the entry alone.
-            $this->warn(sprintf(
-                '%s does not hold %s, installing it without the store',
-                $entry->path,
-                $package->getPrettyName()
-            ));
+            $this->warnMismatch($entry, $package);
 
             return self::promise($this->downloads->install($package, $path));
         }
@@ -122,27 +146,23 @@ final class StoreInstaller extends LibraryInstaller
         return $extraction->then(
             function () use ($package, $entry, $temp, $path): void {
                 try {
-                    $published = $this->store->publish($temp, $entry, $this->metadata($package));
+                    $result = $this->store->publish($temp, $entry, $this->metadata($package), $this->readOnly);
                 } catch (StoreException $e) {
                     $this->warn($e->getMessage() . ', installing ' . $package->getPrettyName() . ' without the store');
                     $this->useExtractedCopy($temp, $path);
 
                     return;
                 }
-                if (!$published && !$entry->isValid()) {
-                    // Another process published something else under this key in the meantime.
-                    $this->warn(sprintf(
-                        '%s does not hold %s, installing it without the store',
-                        $entry->path,
-                        $package->getPrettyName()
-                    ));
+                if ($result === PublishResult::Conflict) {
+                    // Another process published different files under this key in the meantime.
+                    $this->warnMismatch($entry, $package);
                     $this->useExtractedCopy($temp, $path);
 
                     return;
                 }
-                if (!$published) {
-                    // Another process published the same package first: use theirs.
-                    Store::removeTree($temp);
+                if ($result === PublishResult::AlreadyPublished && $this->readOnly) {
+                    // The process that won may not use read-only mode.
+                    Store::makeReadOnly($entry->filesDir());
                 }
                 $this->place($package, $entry, $path);
             },
@@ -198,12 +218,71 @@ final class StoreInstaller extends LibraryInstaller
         ) {
             return null;
         }
+
+        $reason = $this->skipRules()->reason($package);
+        if ($reason !== null) {
+            $name = $package->getPrettyName();
+            $message = sprintf('    composer-store: %s is %s, installing it without the store', $name, $reason);
+            $this->io->writeError($message, true, IOInterface::VERBOSE);
+
+            return null;
+        }
+
         $downloader = $this->downloads->getDownloaderForPackage($package);
         if (!$downloader instanceof ArchiveDownloader || !$this->storeIsUsable()) {
             return null;
         }
 
         return $downloader;
+    }
+
+    private function skipRules(): SkipRules
+    {
+        return $this->skipRules ??= new SkipRules(
+            $this->config->exclude,
+            PatchedPackages::find($this->project->getPackage(), $this->projectDir(), $this->projectPackages())
+        );
+    }
+
+    /**
+     * Every package of the project, installed or about to be: any of them may declare patches.
+     * Composer writes the lock file before it installs anything, so it holds the packages to come.
+     *
+     * @return list<PackageInterface>
+     */
+    private function projectPackages(): array
+    {
+        $packages = array_values($this->project->getRepositoryManager()->getLocalRepository()->getPackages());
+        $locker = $this->project->getLocker();
+        try {
+            if (!$locker->isLocked()) {
+                return $packages;
+            }
+        } catch (\Exception) {
+            return $packages;
+        }
+        foreach ([true, false] as $withDev) {
+            try {
+                $locked = $locker->getLockedRepository($withDev)->getPackages();
+
+                return array_merge($packages, array_values($locked));
+            } catch (\Exception) {
+                // A lock file without dev packages: try again without them.
+            }
+        }
+
+        return $packages;
+    }
+
+    private function projectDir(): string
+    {
+        $composerJson = realpath(Factory::getComposerFile());
+        if ($composerJson !== false) {
+            return dirname($composerJson);
+        }
+        $cwd = getcwd();
+
+        return $cwd === false ? '.' : $cwd;
     }
 
     /**
@@ -247,7 +326,45 @@ final class StoreInstaller extends LibraryInstaller
             return false;
         }
 
+        if (!$this->lockStore($root)) {
+            return false;
+        }
+
+        $this->readOnly = $this->config->readOnly;
+        if ($this->readOnly && PHP_OS_FAMILY === 'Windows') {
+            // Windows cannot delete a read-only file, and clearing the flag would clear it for every link.
+            $this->warn('read-only mode is not supported on Windows yet, ignoring it');
+            $this->readOnly = false;
+        }
+
         return true;
+    }
+
+    /**
+     * Takes the store lock shared for the rest of the run, waiting for store maintenance to finish.
+     */
+    private function lockStore(string $root): bool
+    {
+        if ($this->lock->acquireShared(0)) {
+            return true;
+        }
+
+        $timeout = self::lockTimeout();
+        $message = sprintf('composer-store: waiting up to %d seconds for the store lock', $timeout);
+        $this->io->writeError('<info>' . $message . '</info>');
+        if ($this->lock->acquireShared($timeout)) {
+            return true;
+        }
+        $this->warn(sprintf('could not lock the store (%s), installing packages without the store', $root));
+
+        return false;
+    }
+
+    private static function lockTimeout(): float
+    {
+        $value = $_SERVER['COMPOSER_STORE_LOCK_TIMEOUT'] ?? getenv('COMPOSER_STORE_LOCK_TIMEOUT');
+
+        return is_numeric($value) && $value >= 0 ? (float) $value : self::DEFAULT_LOCK_TIMEOUT;
     }
 
     /**
@@ -288,6 +405,12 @@ final class StoreInstaller extends LibraryInstaller
     private static function promise(mixed $result): PromiseInterface
     {
         return $result instanceof PromiseInterface ? $result : \React\Promise\resolve(null);
+    }
+
+    private function warnMismatch(StoreEntry $entry, PackageInterface $package): void
+    {
+        $name = $package->getPrettyName();
+        $this->warn(sprintf('%s does not hold %s, installing it without the store', $entry->path, $name));
     }
 
     private function warn(string $message): void

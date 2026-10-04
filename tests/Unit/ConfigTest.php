@@ -79,6 +79,42 @@ final class ConfigTest extends TestCase
         $this->assertSame(['extra.composer-store must be an object, ignoring it'], $config->warnings);
     }
 
+    public function testExcludeListsFromEveryLayerApply(): void
+    {
+        $config = Config::fromSettings([
+            ['exclude' => ['Acme/Global', 'acme/both']],
+            ['exclude' => ['acme/project', 'acme/both']],
+        ], '/store');
+
+        $this->assertSame(['acme/global', 'acme/both', 'acme/project'], $config->exclude);
+        $this->assertSame([], $config->warnings);
+    }
+
+    public function testInvalidExcludeEntriesAreIgnoredWithAWarning(): void
+    {
+        $config = Config::fromSettings([['exclude' => ['acme/ok', 42, '']], ['exclude' => 'acme/not-a-list']], '/s');
+
+        $this->assertSame(['acme/ok'], $config->exclude);
+        $this->assertCount(3, $config->warnings);
+    }
+
+    public function testReadOnlyIsOffByDefaultAndTheProjectWins(): void
+    {
+        $this->assertFalse(Config::fromSettings([null], '/s')->readOnly);
+        $this->assertTrue(Config::fromSettings([['read-only' => true]], '/s')->readOnly);
+        $this->assertFalse(Config::fromSettings([['read-only' => true], ['read-only' => false]], '/s')->readOnly);
+    }
+
+    public function testReadOnlyAcceptsTheStringsComposerConfigWrites(): void
+    {
+        $this->assertTrue(Config::fromSettings([['read-only' => 'true']], '/s')->readOnly);
+        $this->assertFalse(Config::fromSettings([['read-only' => '0']], '/s')->readOnly);
+
+        $invalid = Config::fromSettings([['read-only' => 'sometimes']], '/s');
+        $this->assertFalse($invalid->readOnly);
+        $this->assertSame(['read-only must be true or false, not "sometimes"; using false'], $invalid->warnings);
+    }
+
     public function testTheStoreLivesInTheComposerHomeByDefault(): void
     {
         $this->assertSame('/home/me/.composer/store', Config::storeDir('/home/me/.composer/'));

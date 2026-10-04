@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace ComposerStore\Tests\Integration;
 
+use ComposerStore\Store\TreeHasher;
 use ComposerStore\Tests\Support\Files;
 use ComposerStore\Tests\Support\Process;
 
@@ -21,11 +22,13 @@ final class InstallTest extends IntegrationTestCase
         );
         $this->assertLinkedFromStore($project, 'acme/alpha', '1.0.0');
 
-        $meta = Files::readJson($this->storeEntry('acme/alpha', '1.0.0') . '/.store-meta.json');
+        $entry = $this->storeEntry('acme/alpha', '1.0.0');
+        $meta = Files::readJson($entry . '/.store-meta.json');
         $this->assertSame('acme/alpha', $meta['name']);
         $this->assertSame('1.0.0', $meta['version']);
         $this->assertSame($this->env->reference('acme/alpha', '1.0.0'), $meta['reference']);
         $this->assertSame(['type' => 'zip'], array_intersect_key((array) $meta['dist'], ['type' => true]));
+        $this->assertSame(TreeHasher::hash($entry . '/files'), $meta['tree_hash']);
 
         // __DIR__ in a linked file is the project's vendor/, not the store.
         $dir = $this->php($project, 'echo Acme\Alpha\Alpha::dir();');

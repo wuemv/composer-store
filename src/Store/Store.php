@@ -22,6 +22,14 @@ final class Store
     }
 
     /**
+     * The store-wide lock: shared while installing, exclusive while deleting entries.
+     */
+    public function lock(): StoreLock
+    {
+        return new StoreLock($this->root . '/.lock');
+    }
+
+    /**
      * Creates the store directories if needed and returns the store's real path.
      */
     public function initialize(): string
@@ -76,28 +84,60 @@ final class Store
     }
 
     /**
-     * Writes the metadata into a temp dir that holds a complete `files/` tree, then renames the temp
-     * dir into place. The rename is atomic, so other processes see either no entry or a complete one.
+     * Turns a temp dir holding a complete `files/` tree into $entry: adds the tree hash to the
+     * metadata, makes the files read-only if asked, writes the metadata, and renames the temp dir into
+     * place. The rename is atomic, so other processes see either no entry or a complete one.
      *
-     * Returns false when another process published an entry at that path first. The temp dir is left
-     * alone then: the caller checks the existing entry and uses its own copy if that entry is not valid.
+     * When another process got there first, its entry is used only if it holds the same files.
      *
      * @param array<string, mixed> $meta
      */
-    public function publish(string $tempDir, StoreEntry $entry, array $meta): bool
+    public function publish(string $tempDir, StoreEntry $entry, array $meta, bool $readOnly = false): PublishResult
     {
+        $files = $tempDir . '/' . StoreEntry::FILES_DIR;
+        $meta['tree_hash'] = TreeHasher::hash($files);
+        if ($readOnly) {
+            self::makeReadOnly($files);
+        }
         StoreEntry::writeMeta($tempDir, $meta);
         self::ensureDir(dirname($entry->path));
+
         if (@rename($tempDir, $entry->path)) {
-            return true;
+            return PublishResult::Published;
         }
         $error = self::lastError();
         clearstatcache();
-        if (is_dir($entry->filesDir())) {
-            return false;
+        if (!is_dir($entry->filesDir())) {
+            throw new StoreException(sprintf('Cannot move %s to %s: %s', $tempDir, $entry->path, $error));
         }
 
-        throw new StoreException(sprintf('Cannot move %s to %s: %s', $tempDir, $entry->path, $error));
+        $existingHash = StoreEntry::readMeta($entry->path)['tree_hash'] ?? $meta['tree_hash'];
+        if ($entry->isValid() && $existingHash === $meta['tree_hash']) {
+            self::removeTree($tempDir);
+
+            return PublishResult::AlreadyPublished;
+        }
+
+        return PublishResult::Conflict;
+    }
+
+    /**
+     * Removes the write bits of every file in a tree. Hard links share permissions, so the files
+     * become read-only in every vendor/ that links them. Directories stay writable.
+     */
+    public static function makeReadOnly(string $dir): void
+    {
+        $files = new \RecursiveIteratorIterator(
+            new \RecursiveDirectoryIterator($dir, \FilesystemIterator::SKIP_DOTS)
+        );
+        foreach ($files as $info) {
+            if ($info instanceof \SplFileInfo && $info->isFile() && !$info->isLink()) {
+                $perms = $info->getPerms() & 07777;
+                if (($perms & 0222) !== 0) {
+                    @chmod($info->getPathname(), $perms & ~0222);
+                }
+            }
+        }
     }
 
     /**

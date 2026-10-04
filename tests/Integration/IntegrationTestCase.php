@@ -9,6 +9,7 @@ use ComposerStore\Tests\Integration\Support\FixtureRepository;
 use ComposerStore\Tests\Support\Files;
 use ComposerStore\Tests\Support\Process;
 use ComposerStore\Tests\Support\ProcessResult;
+use ComposerStore\Tests\Support\RunningProcess;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -52,8 +53,9 @@ abstract class IntegrationTestCase extends TestCase
      *
      * @param array<string, string> $require
      * @param array<string, mixed>  $settings extra.composer-store
+     * @param array<string, mixed>  $extra    other root `extra` keys, such as `patches`
      */
-    protected function createProject(string $name, array $require, array $settings = []): string
+    protected function createProject(string $name, array $require, array $settings = [], array $extra = []): string
     {
         $dir = $this->work . '/' . $name;
         $manifest = [
@@ -67,7 +69,10 @@ abstract class IntegrationTestCase extends TestCase
             'require' => $require,
         ];
         if ($settings !== []) {
-            $manifest['extra'] = ['composer-store' => $settings];
+            $extra['composer-store'] = $settings;
+        }
+        if ($extra !== []) {
+            $manifest['extra'] = $extra;
         }
         Files::writeJson($dir . '/composer.json', $manifest);
 
@@ -91,15 +96,37 @@ abstract class IntegrationTestCase extends TestCase
     }
 
     /**
-     * @param list<string> $args
+     * @param list<string>          $args
+     * @param array<string, string> $env  extra environment variables
      */
-    protected function runComposer(string $project, array $args, bool $plugin = true): ProcessResult
-    {
-        return $this->env->composer->run($project, $args, [
+    protected function runComposer(
+        string $project,
+        array $args,
+        bool $plugin = true,
+        array $env = [],
+        bool $network = false,
+    ): ProcessResult {
+        return $this->startComposer($project, $args, $plugin, $env, $network)->wait();
+    }
+
+    /**
+     * Starts Composer in the background, with the plugin installed globally.
+     *
+     * @param list<string>          $args
+     * @param array<string, string> $env  extra environment variables
+     */
+    protected function startComposer(
+        string $project,
+        array $args,
+        bool $plugin = true,
+        array $env = [],
+        bool $network = false,
+    ): RunningProcess {
+        return $this->env->composer->start($project, $args, $env + [
             'COMPOSER_HOME' => $plugin ? $this->env->pluginHome : $this->env->plainHome,
             'COMPOSER_CACHE_DIR' => $this->env->cache,
             'COMPOSER_STORE_DIR' => $this->store,
-        ]);
+        ], $network);
     }
 
     /**

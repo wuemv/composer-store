@@ -25,8 +25,6 @@ jobs:
   tests:
     name: PHP ${{ matrix.php }}, Composer ${{ matrix.composer }}, ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
-    # Windows support is Phase 4: run it, but don't fail the build on it yet.
-    continue-on-error: ${{ matrix.os == 'windows-latest' }}
     strategy:
       fail-fast: false
       matrix:
