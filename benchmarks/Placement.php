@@ -28,9 +28,11 @@ final class Placement
     }
 
     /**
-     * @return string the results, as Markdown
+     * Writes the results as Markdown, a row as soon as it is measured.
+     *
+     * @param \Closure(string): void $write gets one line at a time
      */
-    public function run(): string
+    public function run(\Closure $write): void
     {
         $this->load();
         $lines = [
@@ -49,6 +51,9 @@ final class Placement
             '| Method | Time | Per package |',
             '|---|---:|---:|',
         ];
+        foreach ($lines as $line) {
+            $write($line);
+        }
         foreach ($this->methods() as $name => $method) {
             $times = [];
             for ($round = 0; $round < $this->rounds; $round++) {
@@ -60,11 +65,9 @@ final class Placement
             }
             sort($times);
             $median = $times[intdiv(count($times), 2)];
-            $lines[] = sprintf('| %s | %.2f s | %.1f ms |', $name, $median, 1000 * $median / count($this->entries));
+            $write(sprintf('| %s | %.2f s | %.1f ms |', $name, $median, 1000 * $median / count($this->entries)));
         }
         self::exec(['rm', '-rf', $this->target]);
-
-        return implode("\n", $lines) . "\n";
     }
 
     /**

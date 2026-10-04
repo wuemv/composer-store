@@ -30,4 +30,6 @@ if (!is_string($store) || !is_string($cache)) {
 $target = is_string($options['target'] ?? null) ? $options['target'] : dirname($store) . '/placement';
 $rounds = is_string($options['rounds'] ?? null) ? max(1, (int) $options['rounds']) : 3;
 
-echo (new Placement($store, $cache, $target, $rounds))->run();
+(new Placement($store, $cache, $target, $rounds))->run(static function (string $line): void {
+    echo $line, "\n";
+});
