@@ -5,6 +5,9 @@ declare(strict_types=1);
 namespace ComposerStore\Link;
 
 use ComposerStore\Store\Store;
+use React\Promise\PromiseInterface;
+
+use function React\Promise\reject;
 
 /**
  * Recreates a store entry's file tree at a vendor/ path, with real directories and, for every file, a
@@ -63,6 +66,40 @@ final class Linker
     }
 
     /**
+     * Same as reflink(), but leaves running cp to $run, so that several packages can be cloned at
+     * once: $run gets the command and returns a promise that rejects when the command fails.
+     *
+     * @param callable(list<string>): PromiseInterface<mixed> $run
+     *
+     * @return PromiseInterface<null> rejected with a LinkException when the tree cannot be cloned;
+     *                                nothing is left at $target then
+     */
+    public function reflinkAsync(string $source, string $target, callable $run): PromiseInterface
+    {
+        $temp = $this->startPlacing($target);
+        try {
+            $cloning = $run($this->cloner->treeCommand($source, $temp));
+        } catch (\Throwable $e) {
+            Store::removeTree($temp);
+
+            return reject($e);
+        }
+
+        return $cloning->then(
+            function () use ($temp, $target) {
+                $this->finishPlacing($temp, $target);
+
+                return null;
+            },
+            static function (\Throwable $e) use ($temp): void {
+                Store::removeTree($temp);
+
+                throw $e;
+            }
+        );
+    }
+
+    /**
      * Same as link(), but every file is copied.
      */
     public function copy(string $source, string $target): void
@@ -81,6 +118,21 @@ final class Linker
      */
     private function place(string $target, callable $fill): void
     {
+        $temp = $this->startPlacing($target);
+        try {
+            $fill($temp);
+        } catch (\Throwable $e) {
+            Store::removeTree($temp);
+            throw $e;
+        }
+        $this->finishPlacing($temp, $target);
+    }
+
+    /**
+     * Checks that $target does not exist, creates its parent, and returns a free path next to it.
+     */
+    private function startPlacing(string $target): string
+    {
         if (file_exists($target) || is_link($target)) {
             throw new \RuntimeException($target . ' already exists');
         }
@@ -89,15 +141,18 @@ final class Linker
             throw new \RuntimeException('Cannot create ' . $parent . ': ' . self::lastError());
         }
 
-        $temp = sprintf('%s/.%s.composer-store-%s', $parent, basename($target), bin2hex(random_bytes(4)));
-        try {
-            $fill($temp);
-            if (!@rename($temp, $target)) {
-                throw new \RuntimeException(sprintf('Cannot move %s to %s: %s', $temp, $target, self::lastError()));
-            }
-        } catch (\Throwable $e) {
+        return sprintf('%s/.%s.composer-store-%s', $parent, basename($target), bin2hex(random_bytes(4)));
+    }
+
+    /**
+     * Renames the finished tree into place, or removes it.
+     */
+    private function finishPlacing(string $temp, string $target): void
+    {
+        if (!@rename($temp, $target)) {
+            $error = self::lastError();
             Store::removeTree($temp);
-            throw $e;
+            throw new \RuntimeException(sprintf('Cannot move %s to %s: %s', $temp, $target, $error));
         }
     }
 

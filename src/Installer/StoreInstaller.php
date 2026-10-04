@@ -13,6 +13,7 @@ use Composer\Factory;
 use Composer\Installer\LibraryInstaller;
 use Composer\IO\IOInterface;
 use Composer\Package\PackageInterface;
+use Composer\Util\ProcessExecutor;
 use ComposerStore\Config;
 use ComposerStore\Link\Device;
 use ComposerStore\Link\LinkException;
@@ -26,6 +27,7 @@ use ComposerStore\Store\StoreEntry;
 use ComposerStore\Store\StoreException;
 use ComposerStore\Store\StoreLock;
 use React\Promise\PromiseInterface;
+use Symfony\Component\Process\Process;
 
 /**
  * Installs `library` and `project` packages from the store: a version is extracted into the store once,
@@ -58,6 +60,9 @@ final class StoreInstaller extends LibraryInstaller
     private bool $readOnly = false;
 
     private Method $method = Method::Hardlink;
+
+    /** Composer's process runner, for clones: it runs commands alongside each other. */
+    private ?ProcessExecutor $process = null;
 
     private ?SkipRules $skipRules = null;
 
@@ -147,9 +152,8 @@ final class StoreInstaller extends LibraryInstaller
                 // The entry may predate read-only mode.
                 Store::makeReadOnly($entry->filesDir());
             }
-            $this->place($package, $entry, $path);
 
-            return \React\Promise\resolve(null);
+            return $this->place($package, $entry, $path);
         }
 
         if ($entry->exists()) {
@@ -164,27 +168,28 @@ final class StoreInstaller extends LibraryInstaller
         $extraction = self::promise($downloader->install($package, $temp . '/' . StoreEntry::FILES_DIR, false));
 
         return $extraction->then(
-            function () use ($package, $entry, $temp, $path): void {
+            function () use ($package, $entry, $temp, $path): ?PromiseInterface {
                 try {
                     $result = $this->store->publish($temp, $entry, $this->metadata($package), $this->readOnly);
                 } catch (StoreException $e) {
                     $this->warn($e->getMessage() . ', installing ' . $package->getPrettyName() . ' without the store');
                     $this->useExtractedCopy($temp, $path);
 
-                    return;
+                    return null;
                 }
                 if ($result === PublishResult::Conflict) {
                     // Another process published different files under this key in the meantime.
                     $this->warnMismatch($entry, $package);
                     $this->useExtractedCopy($temp, $path);
 
-                    return;
+                    return null;
                 }
                 if ($result === PublishResult::AlreadyPublished && $this->readOnly) {
                     // The process that won may not use read-only mode.
                     Store::makeReadOnly($entry->filesDir());
                 }
-                $this->place($package, $entry, $path);
+
+                return $this->place($package, $entry, $path);
             },
             static function (\Throwable $reason) use ($temp): void {
                 Store::removeTree($temp);
@@ -209,12 +214,33 @@ final class StoreInstaller extends LibraryInstaller
 
     /**
      * Links a store entry into vendor/, copying instead when that fails.
+     *
+     * Clones are made by cp processes that Composer runs alongside each other, up to ten at once, as
+     * it does for unzip: one package after the other, cloning is slow on APFS.
+     *
+     * @return PromiseInterface<mixed>
      */
-    private function place(PackageInterface $package, StoreEntry $entry, string $path): void
+    private function place(PackageInterface $package, StoreEntry $entry, string $path): PromiseInterface
     {
         if (file_exists($path) || is_link($path)) {
             // Left over from an interrupted run: Composer's own extraction would empty it too.
             $this->filesystem->remove($path);
+        }
+
+        $copyInstead = function (LinkException $e) use ($package, $entry, $path): void {
+            $this->warn($e->getMessage() . ', copying ' . $package->getPrettyName() . ' from the store instead');
+            $this->linker->copy($entry->filesDir(), $path);
+        };
+        if ($this->method === Method::Reflink && $this->process !== null) {
+            return $this->linker->reflinkAsync($entry->filesDir(), $path, $this->runAsync(...))->then(
+                null,
+                static function (\Throwable $e) use ($copyInstead): void {
+                    if (!$e instanceof LinkException) {
+                        throw $e;
+                    }
+                    $copyInstead($e);
+                }
+            );
         }
 
         try {
@@ -224,9 +250,36 @@ final class StoreInstaller extends LibraryInstaller
                 $this->linker->link($entry->filesDir(), $path, $package->getBinaries());
             }
         } catch (LinkException $e) {
-            $this->warn($e->getMessage() . ', copying ' . $package->getPrettyName() . ' from the store instead');
-            $this->linker->copy($entry->filesDir(), $path);
+            $copyInstead($e);
         }
+
+        return \React\Promise\resolve(null);
+    }
+
+    /**
+     * Starts a command in the background. The promise rejects with a LinkException when it fails.
+     *
+     * @param list<string> $command
+     *
+     * @return PromiseInterface<mixed>
+     */
+    private function runAsync(array $command): PromiseInterface
+    {
+        $process = $this->process ?? throw new \LogicException('No process runner');
+        $arguments = [];
+        foreach ($command as $argument) {
+            $arguments[] = ProcessExecutor::escape($argument);
+        }
+        // A command line rather than an array: Composer before 2.3 only runs those.
+        $line = implode(' ', $arguments);
+
+        return $process->executeAsync($line)->then(static function (Process $cp) use ($line): void {
+            if (!$cp->isSuccessful()) {
+                $error = trim((string) strtok($cp->getErrorOutput(), "\n"));
+                $error = $error !== '' ? $error : 'exit code ' . $cp->getExitCode();
+                throw new LinkException(sprintf('%s failed: %s', $line, $error));
+            }
+        });
     }
 
     /**
@@ -358,6 +411,7 @@ final class StoreInstaller extends LibraryInstaller
             return false;
         }
         $this->method = $choice->method;
+        $this->process = $this->method === Method::Reflink ? $this->project->getLoop()->getProcessExecutor() : null;
         $message = sprintf('    composer-store: linking from %s with %s', $root, $this->method->describe());
         $this->io->writeError($message, true, IOInterface::VERBOSE);
         $this->registerProject();

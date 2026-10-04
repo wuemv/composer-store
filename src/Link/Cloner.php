@@ -66,15 +66,26 @@ final class Cloner
      */
     public function cloneTree(string $source, string $target): void
     {
-        $command = match ($this->os) {
+        [$status, , $error] = $this->run($this->treeCommand($source, $target));
+        if ($status !== 0) {
+            throw new LinkException(sprintf('cannot clone %s to %s: %s', $source, $target, $error));
+        }
+    }
+
+    /**
+     * The cp command cloneTree() runs, for callers that run it themselves, several at once.
+     *
+     * @return list<string>
+     *
+     * @throws LinkException on a system without clones
+     */
+    public function treeCommand(string $source, string $target): array
+    {
+        return match ($this->os) {
             'Linux' => ['cp', '-R', '-T', '--reflink=always', '--preserve=mode,timestamps', '--', $source, $target],
             'Darwin' => ['cp', '-c', '-R', '-p', '--', $source, $target],
             default => throw new LinkException('reflinks are not supported on ' . $this->os),
         };
-        [$status, , $error] = $this->run($command);
-        if ($status !== 0) {
-            throw new LinkException(sprintf('cannot clone %s to %s: %s', $source, $target, $error));
-        }
     }
 
     /**

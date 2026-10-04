@@ -50,9 +50,11 @@ final class ReflinkTest extends IntegrationTestCase
     {
         $project = $this->createProject('app', ['acme/beta' => '1.0.0'], ['mode' => 'auto']);
 
-        $output = $this->composer($project, 'install', '-v');
+        $output = $this->composer($project, 'install', '-vvv');
 
         $this->assertStringContainsString('with reflinks', $output);
+        // Each package is cloned by a cp that Composer runs alongside the others, as it runs unzip.
+        $this->assertMatchesRegularExpression("{Executing async command \\(.*\\): 'cp' .*/files' }", $output);
         $this->assertSame(Method::Reflink, $this->linkMethod($project));
         $this->assertLinkedFromStore($project, 'acme/alpha', '2.0.0');
         $this->assertLinkedFromStore($project, 'acme/beta', '1.0.0');
