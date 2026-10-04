@@ -144,7 +144,11 @@ function installSteps(string $from, string $composerVersion): ?array
     } elseif (preg_match('{^([a-z][a-z0-9+.-]*://|git@)}i', $from) === 1) {
         $steps[] = ['global', 'config', 'repositories.composer-store', 'vcs', $from];
     } elseif (is_dir($from)) {
-        $steps[] = ['global', 'config', 'repositories.composer-store', 'path', (string) realpath($from)];
+        // `composer global` reads its arguments again with Symfony's StringInput, which takes backslashes for
+        // escapes (C:\Users\runner gets a carriage return), so Windows paths go with forward slashes.
+        $dir = (string) realpath($from);
+        $dir = PHP_OS_FAMILY === 'Windows' ? strtr($dir, '\\', '/') : $dir;
+        $steps[] = ['global', 'config', 'repositories.composer-store', 'path', $dir];
     } else {
         return null;
     }

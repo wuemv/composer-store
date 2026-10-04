@@ -47,7 +47,8 @@ final class InstallScriptTest extends IntegrationTestCase
         }
         $plugin = is_array($plugin) ? $plugin : [];
         $this->assertSame('path', $plugin['type'] ?? null, (string) json_encode($repositories));
-        $this->assertSame(realpath($this->env->plugin), $plugin['url'] ?? null);
+        // With forward slashes on Windows, where `composer global` would take its backslashes for escapes.
+        $this->assertSame(strtr((string) realpath($this->env->plugin), '\\', '/'), $plugin['url'] ?? null);
 
         // Projects now go through the store.
         $project = $this->createProject('app', ['acme/alpha' => '1.0.0']);
