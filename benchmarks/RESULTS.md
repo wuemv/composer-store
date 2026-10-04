@@ -2,7 +2,15 @@
 
 Five Laravel projects, 556 package installs of 148 different package versions, installed with `run.php` (see [README.md](README.md) for the method). Times are medians of 3 runs of offline installs from a warm Composer cache, with `--no-scripts`.
 
-The numbers come from two versions of the plugin. Commit 5d78b71 cloned one package after the other: a run in the development sandbox, and [Benchmarks run 37191300017](https://github.com/wuemv/composer-store/actions/runs/37191300017) on GitHub Actions. Commit c83f626 clones packages in parallel: [Benchmarks run 37193665389](https://github.com/wuemv/composer-store/actions/runs/37193665389). Hard links work the same in both.
+The numbers come from three versions of the plugin, which differ in how they clone:
+
+| Commit | Clones | Runs | GitHub's Linux runners |
+|---|---|---|---|
+| 5d78b71 | `cp`, one package after the other | the development sandbox, and [Benchmarks run 37191300017](https://github.com/wuemv/composer-store/actions/runs/37191300017) | 2 CPUs |
+| c83f626 | `cp`, several packages at once | [Benchmarks run 37193665389](https://github.com/wuemv/composer-store/actions/runs/37193665389) | 2 CPUs |
+| 3d528dd | on macOS, `clonefile(2)` through FFI, one call per package | [Benchmarks runs 37210521392](https://github.com/wuemv/composer-store/actions/runs/37210521392) (A) and [37211538803](https://github.com/wuemv/composer-store/actions/runs/37211538803) (B) | 4 CPUs |
+
+Hard links work the same in all three. Compare times within a run, not across runs, because the runners differ. GitHub gives private repositories Linux runners with 2 CPUs and public ones runners with 4, and this repository went public between c83f626 and 3d528dd. macOS runners are the same size either way and still vary: without the plugin, the five installs took from 9.78 s to 25.02 s, depending on the run.
 
 ## Summary
 
@@ -11,35 +19,63 @@ Disk space taken by the five projects, store included:
 | | No plugin | With the plugin | Saved |
 |---|---:|---:|---:|
 | Linux, ext4, hard links | 375 MiB | 176 MiB | 53% |
-| Linux, Btrfs, reflinks or hard links | 236 MiB | 82 MiB | 65% |
-| macOS, APFS, reflinks | 385 MiB | 154 MiB | 60% |
-| macOS, APFS, hard links | 385 MiB | 161 MiB | 58% |
+| Linux, Btrfs, reflinks or hard links | 236 to 238 MiB | 72 to 84 MiB | 64 to 70% |
+| macOS, APFS, reflinks | 372 to 403 MiB | 133 to 195 MiB | 49 to 67% |
+| macOS, APFS, hard links | 372 to 403 MiB | 161 to 214 MiB | 42 to 58% |
 
-Free space on APFS moves by tens of MiB from one run to the next: the earlier run measured 49% for reflinks and 57% for hard links.
+The ranges span the runs: free space on APFS moves by tens of MiB from one run to the next.
 
-Time to install all five projects, compared with no plugin, with packages cloned in parallel:
+Installing all five projects from a warm store, with every package already in the store, compared with no plugin in the same run:
 
-| | No plugin | Empty store | | Warm store | |
-|---|---:|---:|---:|---:|---:|
-| Linux VM (sandbox), ext4, hard links | 16.03 s | 16.57 s | +3% | 13.76 s | −14% |
-| GitHub Actions, Linux, ext4, hard links | 13.78 s | 13.35 s | −3% | 11.87 s | −14% |
-| GitHub Actions, Linux, Btrfs, hard links | 14.71 s | 13.89 s | −6% | 11.70 s | −20% |
-| GitHub Actions, Linux, Btrfs, reflinks | 14.71 s | 17.16 s | +17% | 14.69 s | 0% |
-| GitHub Actions, macOS, APFS, reflinks | 9.78 s | 16.84 s | +72% | 14.71 s | +50% |
-| GitHub Actions, macOS, APFS, hard links | 9.78 s | 21.59 s | +121% | 18.54 s | +90% |
+| | 5d78b71 | c83f626 | 3d528dd, A | 3d528dd, B |
+|---|---:|---:|---:|---:|
+| Linux VM (sandbox, 4 vCPUs), ext4, hard links | −14% | | | |
+| GitHub Actions, Linux, ext4, hard links | −14% | −8% | +8% | +14% |
+| GitHub Actions, Linux, Btrfs, hard links | −22% | −20% | −5% | −2% |
+| GitHub Actions, Linux, Btrfs, reflinks | +2% | 0% | +4% | +9% |
+| GitHub Actions, macOS, APFS, reflinks | +88% | +50% | **+11%** | **+15%** |
+| GitHub Actions, macOS, APFS, hard links | +87% | +90% | +39% | +25% |
 
-Cloning in parallel took macOS from +88% to +50% with a warm store, and from +98% to +26% when the autoloader is left out (`--no-autoloader`); see the macOS section below.
+The same with `--no-autoloader`, which leaves out generating the optimized autoloader:
 
-"Empty store" is the first time: each package is extracted into the store by the first project that needs it, and linked by the others. "Warm store" is every later install: everything is linked.
+| | 5d78b71 | c83f626 | 3d528dd, A | 3d528dd, B |
+|---|---:|---:|---:|---:|
+| Linux VM (sandbox, 4 vCPUs), ext4, hard links | −12% | | | |
+| GitHub Actions, Linux, ext4, hard links | −13% | −13% | +14% | +24% |
+| GitHub Actions, Linux, Btrfs, hard links | −29% | −31% | −9% | −7% |
+| GitHub Actions, Linux, Btrfs, reflinks | −10% | −20% | −13% | −11% |
+| GitHub Actions, macOS, APFS, reflinks | +98% | +26% | **−21%** | **−19%** |
+| GitHub Actions, macOS, APFS, hard links | +127% | +119% | +96% | +90% |
 
-- **Disk space**: the plugin halves what five Laravel projects take, or better. Every further project on the same versions only adds its directories, `vendor/composer/` and its copied binaries, plus a little per file for clones. Btrfs keeps small files inline, which is why it needs less space to begin with.
-- **Linux with hard links**: installs from a warm store are 14 to 20% faster, and filling an empty store costs about as much as installing without the plugin.
-- **Reflinks on Linux** are about as fast as installing without the plugin, 20% faster without the autoloader: `cp` runs once per package, and the projects then read their clones from disk (below).
-- **macOS** installs from a warm store take about 50% longer than without the plugin, with reflinks, which `auto` picks on APFS. Hard links are slower there: linking file by file is slow on APFS. Until commit c83f626 the plugin also cloned one package after the other, where Composer extracts several archives at once; it now runs its `cp` processes in parallel the same way.
-- **Clones are read from disk once.** Generating the optimized autoloader reads every class file: right after an unzip those files are in memory, but a clone shares blocks on disk, not the page cache, so its first read goes to the disk. That is most of what is left of the gap on macOS (about 6 s instead of 3 s for five projects), and costs about 2 s on Btrfs. Cloning each package with one `clonefile(2)` call through FFI, which works on the macOS runners, may shave off more.
-- **Generating the autoloader**, which these projects optimize, takes 1 to 1.5 s per project with or without the plugin: compare the two time tables of each machine below.
+- **Disk space**: the plugin takes about half to two thirds off what five Laravel projects take. Every further project on the same versions only adds its directories, `vendor/composer/` and its copied binaries, plus a little per file for clones. Btrfs keeps small files inline, which is why it needs less space to begin with.
+- **macOS**: cloning each package with one `clonefile(2)` call took installs from a warm store from 50% slower than without the plugin to 11 and 15% slower in runs A and B, and to about 20% faster without the autoloader. Hard links stay slow on APFS.
+- **Clones are read from disk once.** Generating the optimized autoloader reads every class file: right after an unzip those files are in memory, but a clone shares blocks on disk, not the page cache, so its first read goes to the disk. On macOS that made the autoloader step take 11.8 s instead of 7.2 s for the five projects in run A, and 16.4 s instead of 9.7 s in run B: it is what is left of the gap.
+- **Linux with hard links**: the plugin links file by file in one process, while Composer unzips ten archives at once, so plain Composer gains more from more CPUs. On the 2-CPU runners, installs from a warm store were 8 to 22% faster with the plugin; on the 4-CPU runners they range from 5% faster to 14% slower. Running several `cp -al` at once, which placed the files 2.5 times faster than PHP's `link()` on ext4 (see [Placing package files](#placing-package-files)), could bring the advantage back.
+- **Reflinks on Linux** take 0 to 9% longer than installing without the plugin, and 10 to 20% less time without the autoloader: `cp` runs once per package, several at once, and the projects then read their clones from disk.
+- **Generating the autoloader**, which these projects optimize, takes 0.7 to 2 s per project without the plugin, depending on the machine: compare the two time tables of each run.
 
-## Linux VM (development sandbox), ext4
+## GitHub Actions, commit 3d528dd
+
+`clonefile(2)` on macOS, and the 4-CPU Linux runners of a public repository: [Benchmarks runs 37210521392](https://github.com/wuemv/composer-store/actions/runs/37210521392) (A) and [37211538803](https://github.com/wuemv/composer-store/actions/runs/37211538803) (B). PHP 8.4.26 with FFI, Composer 2.10.3. All five projects together; each run's job summaries have the times per project.
+
+| All 5 projects | Run | No plugin | Reflinks, empty store | Reflinks, warm store | Hard links, empty store | Hard links, warm store |
+|---|---|---:|---:|---:|---:|---:|
+| macOS, install | A | 18.74 s | 26.45 s | 20.80 s | 32.19 s | 26.07 s |
+| macOS, install | B | 25.02 s | 33.00 s | 28.69 s | 42.17 s | 31.25 s |
+| macOS, `--no-autoloader` | A | 11.51 s | 12.00 s | 9.05 s | 24.46 s | 22.55 s |
+| macOS, `--no-autoloader` | B | 15.28 s | 14.78 s | 12.32 s | 26.89 s | 29.00 s |
+| Linux, Btrfs, install | A | 9.45 s | 12.20 s | 9.82 s | 9.96 s | 9.01 s |
+| Linux, Btrfs, install | B | 11.61 s | 14.23 s | 12.69 s | 12.59 s | 11.32 s |
+| Linux, Btrfs, `--no-autoloader` | A | 6.01 s | 7.27 s | 5.20 s | 6.32 s | 5.46 s |
+| Linux, Btrfs, `--no-autoloader` | B | 7.11 s | 7.79 s | 6.34 s | 7.82 s | 6.58 s |
+| Linux, ext4, install | A | 8.32 s | — | — | 9.88 s | 9.01 s |
+| Linux, ext4, install | B | 7.89 s | — | — | 9.63 s | 9.01 s |
+| Linux, ext4, `--no-autoloader` | A | 4.70 s | — | — | 6.09 s | 5.37 s |
+| Linux, ext4, `--no-autoloader` | B | 4.50 s | — | — | 6.26 s | 5.58 s |
+
+On ext4, which has no reflinks, `auto` uses hard links. Disk space without and with the plugin: 375 and 176 MiB on ext4 in both runs; 237 and 82 MiB with reflinks on Btrfs in both runs; 372 and 144 MiB with reflinks on macOS in run A, 403 and 133 MiB in run B.
+
+## Linux VM (development sandbox), ext4, commit 5d78b71
 
 Firecracker VM, 4 vCPUs, ext4 on a virtio disk. Linux 6.18.44 x86_64, PHP 8.3.6, Composer 2.8.12. In this VM, creating a hard link or a directory takes about 38 µs.
 
@@ -67,7 +103,7 @@ Firecracker VM, 4 vCPUs, ext4 on a virtio disk. Linux 6.18.44 x86_64, PHP 8.3.6,
 
 The store alone, per `du`: 121 MiB.
 
-## GitHub Actions, Linux, ext4
+## GitHub Actions, Linux, ext4, commit 5d78b71
 
 `ubuntu-latest`: Linux 6.17 (Azure) x86_64, PHP 8.4.26, Composer 2.10.3.
 
@@ -95,7 +131,7 @@ The store alone, per `du`: 121 MiB.
 
 The store alone, per `du`: 121 MiB.
 
-## GitHub Actions, Linux, Btrfs, packages cloned one after the other
+## GitHub Actions, Linux, Btrfs, commit 5d78b71: packages cloned one after the other
 
 The same runner, with the work directory on a loop-mounted Btrfs image.
 
@@ -123,7 +159,7 @@ The same runner, with the work directory on a loop-mounted Btrfs image.
 
 The store alone, per `du`: 111 MiB, more than the whole installs took: `du` counts whole blocks for the small files Btrfs keeps inline.
 
-## GitHub Actions, macOS, APFS, packages cloned in parallel
+## GitHub Actions, macOS, APFS, commit c83f626: packages cloned in parallel
 
 [Benchmarks run 37193665389](https://github.com/wuemv/composer-store/actions/runs/37193665389), commit c83f626: `macos-latest`, Darwin 25.6 arm64, PHP 8.4.26, Composer 2.10.3.
 
@@ -149,7 +185,7 @@ The store alone, per `du`: 111 MiB, more than the whole installs took: `du` coun
 |---|---:|---:|---:|
 | 5 projects | 385 MiB | 154 MiB (−60%) | 161 MiB (−58%) |
 
-## GitHub Actions, Linux, Btrfs, packages cloned in parallel
+## GitHub Actions, Linux, Btrfs, commit c83f626: packages cloned in parallel
 
 The same run, on the Btrfs image.
 
@@ -165,7 +201,7 @@ The same run, on the Btrfs image.
 |---|---:|---:|---:|
 | 5 projects | 236 MiB | 82 MiB (−65%) | 82 MiB (−65%) |
 
-## GitHub Actions, macOS, APFS, packages cloned one after the other
+## GitHub Actions, macOS, APFS, commit 5d78b71: packages cloned one after the other
 
 `macos-latest`: Darwin 25.6 arm64, PHP 8.4.26, Composer 2.10.3.
 

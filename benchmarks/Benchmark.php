@@ -223,10 +223,12 @@ final class Benchmark
         ]), "\n");
 
         $lines = [sprintf(
-            '%s %s %s, PHP %s%s, %s. Median of %d %s.',
+            '%s %s %s, %s CPUs, PHP %s%s, %s. Median of %d %s.',
             php_uname('s'),
             php_uname('r'),
             php_uname('m'),
+            // Composer unzips several packages at once, so more CPUs make installs without the plugin faster.
+            self::cpus(),
             PHP_VERSION,
             // On macOS, FFI decides how the plugin clones: clonefile(2) with it, cp without.
             extension_loaded('ffi') ? ' with FFI' : '',
@@ -374,6 +376,17 @@ final class Benchmark
         return count($values) % 2 === 1
             ? (float) $values[$middle]
             : ($values[$middle - 1] + $values[$middle]) / 2;
+    }
+
+    private static function cpus(): string
+    {
+        $count = match (PHP_OS_FAMILY) {
+            'Darwin' => shell_exec('sysctl -n hw.ncpu'),
+            'Windows' => getenv('NUMBER_OF_PROCESSORS'),
+            default => shell_exec('nproc'),
+        };
+
+        return is_string($count) && trim($count) !== '' ? trim($count) : '?';
     }
 
     private static function size(int $bytes): string
