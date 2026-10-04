@@ -34,7 +34,9 @@ final class Placement
      */
     public function run(\Closure $write): void
     {
+        self::progress('Reading the store');
         $this->load();
+        self::progress(sprintf('%d packages, %d files', count($this->entries), $this->files));
         $lines = [
             sprintf(
                 '%s %s %s, PHP %s%s. %d packages, %d files, median of %d rounds.',
@@ -57,6 +59,7 @@ final class Placement
         foreach ($this->methods() as $name => $method) {
             $times = [];
             for ($round = 0; $round < $this->rounds; $round++) {
+                self::progress(sprintf('%s, round %d', $name, $round + 1));
                 self::exec(['rm', '-rf', $this->target]);
                 mkdir($this->target, 0777, true);
                 $start = hrtime(true);
@@ -219,6 +222,11 @@ final class Placement
             }
             usleep(500);
         }
+    }
+
+    private static function progress(string $message): void
+    {
+        fwrite(STDERR, date('H:i:s ') . $message . "\n");
     }
 
     /**

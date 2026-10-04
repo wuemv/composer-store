@@ -56,6 +56,7 @@ jobs:
       - name: Fill a store and a Composer cache
         run: php benchmarks/run.php --work="${BENCHMARK_DIR:-$RUNNER_TEMP/benchmark}" --runs=1 > /dev/null
       - name: Time the placement methods
+        timeout-minutes: 30
         run: |
           set -o pipefail
           dir="${BENCHMARK_DIR:-$RUNNER_TEMP/benchmark}"
