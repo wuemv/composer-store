@@ -55,6 +55,20 @@ jobs:
           '
       - name: Fill a store and a Composer cache
         run: php benchmarks/run.php --work="${BENCHMARK_DIR:-$RUNNER_TEMP/benchmark}" --runs=1 > /dev/null
+      - name: Look at the first seconds of the run (macOS)
+        if: runner.os == 'macOS'
+        continue-on-error: true
+        run: |
+          dir="$RUNNER_TEMP/benchmark"
+          php benchmarks/placement.php --store="$dir/store-auto" --cache="$dir/cache/files" --rounds=1 \
+            > "$RUNNER_TEMP/debug.out" 2> "$RUNNER_TEMP/debug.err" &
+          pid=$!
+          sleep 20
+          echo "--- stdout"; cat "$RUNNER_TEMP/debug.out"
+          echo "--- stderr"; cat "$RUNNER_TEMP/debug.err"
+          echo "--- process"; ps -o pid,stat,rss,time,command -p "$pid" || true
+          echo "--- sample"; sample "$pid" 2 2>&1 | grep -v '^\s*$' | head -60 || true
+          kill "$pid" || true
       - name: Time the placement methods
         timeout-minutes: 30
         run: |
