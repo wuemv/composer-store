@@ -42,3 +42,5 @@ php benchmarks/run.php [--work=DIR] [--runs=3] [--mode=auto] [--mode=hardlink] [
 The plugin under test is the checkout `run.php` belongs to, installed in a Composer home of its own. Your Composer home is only used by the warm-up.
 
 The [Benchmarks workflow](../.github/workflows/benchmarks.yml) runs it on GitHub Actions on Linux (ext4, and Btrfs for reflinks) and macOS (APFS).
+
+`run-placement.php` (with `Placement.php`) times only the placing of package files, on the store and Composer cache a `run.php` run leaves behind: PHP hard links and copies, `cp -al` or `pax -rwl`, `cp` clones one at a time and in parallel, `clonefile(2)` through FFI on macOS, and `unzip` one at a time and ten at a time, as Composer does. The [Placement workflow](../.github/workflows/placement.yml) runs it on the same three machines.
