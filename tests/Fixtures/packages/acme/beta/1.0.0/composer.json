@@ -1,0 +1,14 @@
+{
+    "name": "acme/beta",
+    "description": "Fixture library with a binary.",
+    "type": "library",
+    "require": {
+        "acme/alpha": "^1.0 || ^2.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "Acme\\Beta\\": "src/"
+        }
+    },
+    "bin": ["bin/beta"]
+}

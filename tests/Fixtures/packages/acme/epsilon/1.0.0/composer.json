@@ -1,0 +1,10 @@
+{
+    "name": "acme/epsilon",
+    "description": "Fixture dependency of a type with no installer of its own, which Composer installs like a library.",
+    "type": "acme-extension",
+    "autoload": {
+        "psr-4": {
+            "Acme\\Epsilon\\": "src/"
+        }
+    }
+}

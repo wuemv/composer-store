@@ -1,0 +1,60 @@
+name: Placement
+
+# Times ways of putting package files into vendor/ (benchmarks/run-placement.php), on a store and a
+# Composer cache filled by one run of the benchmark. Runs by hand, like the Benchmarks workflow.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  placement:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: 'macOS, APFS', os: macos-latest }
+          - { name: 'Linux, Btrfs', os: ubuntu-latest, btrfs: true }
+          - { name: 'Linux, ext4', os: ubuntu-latest }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          coverage: none
+          tools: composer:v2
+          extensions: ffi
+      - name: Mount a Btrfs filesystem
+        if: matrix.btrfs
+        run: |
+          sudo apt-get install -y -q btrfs-progs
+          truncate -s 4G "$RUNNER_TEMP/btrfs.img"
+          mkfs.btrfs -q "$RUNNER_TEMP/btrfs.img"
+          sudo mkdir -p /mnt/btrfs
+          sudo mount -o loop "$RUNNER_TEMP/btrfs.img" /mnt/btrfs
+          sudo chown "$(id -u):$(id -g)" /mnt/btrfs
+          echo "BENCHMARK_DIR=/mnt/btrfs/benchmark" >> "$GITHUB_ENV"
+      - name: Check clonefile() through FFI
+        if: runner.os == 'macOS'
+        continue-on-error: true
+        run: |
+          php -r '
+            var_dump(extension_loaded("ffi"), ini_get("ffi.enable"));
+            $ffi = FFI::cdef("int clonefile(const char *src, const char *dst, uint32_t flags);");
+            file_put_contents(getenv("RUNNER_TEMP") . "/clone-src", "x");
+            var_dump($ffi->clonefile(getenv("RUNNER_TEMP") . "/clone-src", getenv("RUNNER_TEMP") . "/clone-dst", 0));
+            var_dump(file_get_contents(getenv("RUNNER_TEMP") . "/clone-dst"));
+          '
+      - name: Fill a store and a Composer cache
+        run: php benchmarks/run.php --work="${BENCHMARK_DIR:-$RUNNER_TEMP/benchmark}" --runs=1 > /dev/null
+      - name: Time the placement methods
+        timeout-minutes: 30
+        run: |
+          set -o pipefail
+          dir="${BENCHMARK_DIR:-$RUNNER_TEMP/benchmark}"
+          php benchmarks/run-placement.php --store="$dir/store-auto" --cache="$dir/cache/files" | tee "$RUNNER_TEMP/results.md"
+          { echo "### ${{ matrix.name }}"; echo; cat "$RUNNER_TEMP/results.md"; } >> "$GITHUB_STEP_SUMMARY"

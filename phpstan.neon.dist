@@ -1,0 +1,11 @@
+parameters:
+    level: max
+    paths:
+        - src
+        - tests
+        - benchmarks
+        - install.php
+    excludePaths:
+        - tests/Fixtures
+    stubFiles:
+        - phpstan/FFI.stub

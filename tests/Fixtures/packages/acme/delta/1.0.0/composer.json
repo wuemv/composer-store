@@ -1,0 +1,10 @@
+{
+    "name": "acme/delta",
+    "description": "Fixture dependency of type project, like laravel/pint.",
+    "type": "project",
+    "autoload": {
+        "psr-4": {
+            "Acme\\Delta\\": "src/"
+        }
+    }
+}

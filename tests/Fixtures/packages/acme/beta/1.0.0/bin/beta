@@ -1,0 +1,6 @@
+#!/usr/bin/env php
+<?php
+
+require $GLOBALS['_composer_autoload_path'] ?? __DIR__ . '/../../../autoload.php';
+
+echo Acme\Beta\Beta::describe(), PHP_EOL;
