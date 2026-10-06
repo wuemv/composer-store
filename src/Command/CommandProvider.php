@@ -16,6 +16,12 @@ final class CommandProvider implements CommandProviderCapability
      */
     public function getCommands(): array
     {
-        return [new StatusCommand(), new VerifyCommand(), new PruneCommand()];
+        return [
+            new StatusCommand(),
+            new VerifyCommand(),
+            new PruneCommand(),
+            new MonitorCommand(),
+            new DashboardCommand(),
+        ];
     }
 }

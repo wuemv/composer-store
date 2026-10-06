@@ -1,4 +1,4 @@
-# Only the plugin goes into the archives Composer downloads: src/, composer.json and the README.
+# Only the plugin goes into the archives Composer downloads: src/, bin/, composer.json and the README.
 /.github            export-ignore
 /benchmarks         export-ignore
 /spike              export-ignore

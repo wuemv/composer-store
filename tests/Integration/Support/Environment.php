@@ -70,15 +70,17 @@ final class Environment
     }
 
     /**
-     * The plugin as a package a path repository can install: composer.json with a version, and src/.
+     * The plugin as a package a path repository can install: composer.json with a version, src/ and
+     * bin/, as in the archives Composer downloads.
      */
     private static function copyPlugin(string $dir): string
     {
         $project = dirname(__DIR__, 3);
         $manifest = Files::readJson($project . '/composer.json');
-        $keep = array_flip(['name', 'description', 'type', 'require', 'autoload', 'extra']);
+        $keep = array_flip(['name', 'description', 'type', 'require', 'bin', 'autoload', 'extra']);
         Files::writeJson($dir . '/composer.json', array_intersect_key($manifest, $keep) + ['version' => '1.0.0']);
         Files::copyTree($project . '/src', $dir . '/src');
+        Files::copyTree($project . '/bin', $dir . '/bin');
 
         return $dir;
     }

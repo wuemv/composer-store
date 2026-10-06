@@ -31,6 +31,18 @@ final class RunningProcess
         return (string) @file_get_contents($this->stdoutFile);
     }
 
+    /**
+     * Ends a process that would otherwise run on, such as a server, and returns what it wrote.
+     */
+    public function stop(): ProcessResult
+    {
+        if ($this->result === null) {
+            proc_terminate($this->process);
+        }
+
+        return $this->wait();
+    }
+
     public function wait(): ProcessResult
     {
         if ($this->result === null) {

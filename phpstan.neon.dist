@@ -5,6 +5,7 @@ parameters:
         - tests
         - benchmarks
         - install.php
+        - bin/composer-store
     excludePaths:
         - tests/Fixtures
     stubFiles:

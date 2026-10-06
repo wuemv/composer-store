@@ -8,6 +8,7 @@ use Composer\Command\BaseCommand;
 use Composer\Composer;
 use Composer\Factory;
 use ComposerStore\Config;
+use ComposerStore\Monitor\WatchedDir;
 use ComposerStore\Store\Store;
 use ComposerStore\Store\StoreLock;
 use Symfony\Component\Console\Formatter\OutputFormatter;
@@ -84,6 +85,80 @@ abstract class StoreCommand extends BaseCommand
         }
 
         return $lock;
+    }
+
+    /**
+     * The directory a monitoring command watches: its `dir` argument, or else the answer when it asks,
+     * suggesting ~/Developer. Without a terminal to ask in, the suggestion. Null after telling the user
+     * that what they gave is not a directory.
+     */
+    protected function watchedDir(InputInterface $input): ?string
+    {
+        $given = $input->getArgument('dir');
+        if (!is_string($given) || $given === '') {
+            $suggestion = WatchedDir::suggestion();
+            $answer = $this->getIO()->askAndValidate(
+                'Directory to watch [<comment>' . self::escape($suggestion) . '</comment>]: ',
+                static function (mixed $answer): string {
+                    $answer = is_string($answer) ? $answer : '';
+                    if (WatchedDir::resolve($answer) === null) {
+                        throw new \InvalidArgumentException(sprintf('%s is not a directory', $answer));
+                    }
+
+                    return $answer;
+                },
+                3,
+                $suggestion
+            );
+            $given = is_string($answer) ? $answer : $suggestion;
+        }
+        $dir = WatchedDir::resolve($given);
+        if ($dir === null) {
+            $this->error(sprintf('%s is not a directory', $given));
+        }
+
+        return $dir;
+    }
+
+    /**
+     * Shows how far a slow first measurement got, on a terminal: "Measuring 37 of 104 projects".
+     *
+     * @return ?callable(int, int): void null where there is no terminal to show it on
+     */
+    protected function progress(): ?callable
+    {
+        $io = $this->getIO();
+        if (!$io->isDecorated()) {
+            return null;
+        }
+        $shown = 0.0;
+
+        return static function (int $done, int $total) use ($io, &$shown): void {
+            if ($done === $total) {
+                if ($shown > 0) {
+                    $io->overwriteError('', false);
+                }
+
+                return;
+            }
+            if (microtime(true) - $shown >= 0.2) {
+                $io->overwriteError(sprintf('Measuring %d of %d projects', $done, $total), false);
+                $shown = microtime(true);
+            }
+        };
+    }
+
+    /**
+     * Seconds between measurements, from the `interval` option: half a second at least.
+     */
+    protected static function interval(InputInterface $input): float
+    {
+        $interval = $input->getOption('interval');
+        if (!is_numeric($interval) || (float) $interval <= 0) {
+            throw new \InvalidArgumentException('The interval is a number of seconds, such as 2 or 0.5');
+        }
+
+        return max(0.5, (float) $interval);
     }
 
     protected function error(string $message): void

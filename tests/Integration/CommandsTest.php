@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace ComposerStore\Tests\Integration;
 
+use ComposerStore\Link\CloneInfo;
 use ComposerStore\Store\StoreEntry;
 use ComposerStore\Store\StoreLock;
 use ComposerStore\Tests\Support\Files;
+use ComposerStore\Tests\Support\Process;
 use ComposerStore\Tests\Support\ProcessResult;
 
 final class CommandsTest extends IntegrationTestCase
@@ -233,11 +235,138 @@ final class CommandsTest extends IntegrationTestCase
         Files::makeDir($this->work . '/elsewhere');
         $dir = $this->work . '/elsewhere';
 
-        foreach (['store:status', 'store:verify', 'store:prune'] as $command) {
-            $result = $this->storeCommand($dir, $command);
+        $commands = [['store:status'], ['store:verify'], ['store:prune'], ['store:monitor', $dir, '--once']];
+        foreach ($commands as $command) {
+            $result = $this->storeCommand($dir, ...$command);
             $this->assertSame(0, $result->exitCode, $result->describe());
         }
         $this->assertDirectoryDoesNotExist($this->store, 'the commands do not create the store');
+    }
+
+    public function testMonitorMeasuresWhatEachProjectTakesOnDisk(): void
+    {
+        if (PHP_OS_FAMILY === 'Darwin' && CloneInfo::load() === null) {
+            $this->markTestSkipped('On macOS, telling copies from clones needs the FFI extension');
+        }
+        $require = ['acme/alpha' => '1.0.0', 'acme/gamma' => '1.0.0'];
+        $this->composer($this->createProject('sites/first', $require), 'install');
+        $this->composer($this->createProject('sites/second', $require), 'install');
+        $this->composerWithoutPlugin($this->createProject('sites/copied', $require), 'install');
+
+        $sites = $this->work . '/sites';
+        $monitor = $this->json($this->storeCommand($this->work, 'store:monitor', $sites, '--format=json'));
+
+        $this->assertIsArray($monitor['projects']);
+        $projects = [];
+        foreach ($monitor['projects'] as $project) {
+            $this->assertIsArray($project);
+            $projects[basename($this->string($project['dir']))] = $project;
+        }
+        $this->assertSame(['copied', 'first', 'second'], array_keys($projects));
+        foreach (['first', 'second'] as $name) {
+            $this->assertSame(2, $projects[$name]['from-store']);
+            $this->assertSame('hardlink', $projects[$name]['linked-by']);
+            $this->assertLessThan($projects[$name]['vendor-bytes'], $projects[$name]['own-bytes']);
+        }
+        $this->assertSame(0, $projects['copied']['from-store'], 'installed without the plugin');
+        $this->assertSame($projects['copied']['vendor-bytes'], $projects['copied']['own-bytes']);
+        $this->assertIsArray($monitor['store']);
+        $this->assertIsArray($monitor['totals']);
+        $this->assertSame(2, $monitor['store']['entries']);
+        $this->assertGreaterThan(0, $monitor['store']['used-bytes']);
+        $this->assertSame(
+            $monitor['store']['used-bytes'],
+            $monitor['totals']['saved-bytes'],
+            'the two linked projects share one copy of each version, the third has its own'
+        );
+
+        $text = self::text($this->storeCommand($this->work, 'store:monitor', $sites, '--once'));
+        $this->assertMatchesRegularExpression('{^first +2 +2 \(hard links\) }m', $text);
+        $this->assertMatchesRegularExpression('{^copied +2 +0 }m', $text);
+        $this->assertStringContainsString('Saved: ', $text);
+    }
+
+    public function testDashboardServesLiveMeasurementsOnlyWhileItRuns(): void
+    {
+        $this->composer($this->createProject('sites/first', ['acme/alpha' => '1.0.0']), 'install');
+        $args = ['store:dashboard', $this->work . '/sites', '--no-open', '--interval=0.5'];
+        $server = $this->startComposer($this->work, $args);
+        try {
+            $url = '';
+            for ($i = 0; $i < 300 && $url === ''; $i++) {
+                if (preg_match('{http://127\.0\.0\.1:\d+/}', $server->output(), $match) === 1) {
+                    $url = $match[0];
+                } else {
+                    usleep(100_000);
+                }
+            }
+            $this->assertNotSame('', $url, 'the dashboard prints its address');
+
+            $data = $this->dashboardData($url);
+            $this->assertIsArray($data['snapshot']);
+            $this->assertIsArray($data['snapshot']['projects']);
+            $this->assertCount(1, $data['snapshot']['projects']);
+            $this->assertIsArray($data['snapshot']['projects'][0]);
+            $this->assertSame(1, $data['snapshot']['projects'][0]['from-store']);
+            $page = (string) file_get_contents($url);
+            $this->assertStringContainsString('<title>composer-store dashboard</title>', $page);
+
+            $samples = count($this->list($data['history']));
+            $later = $samples;
+            for ($i = 0; $i < 100 && $later === $samples; $i++) {
+                usleep(100_000);
+                $later = count($this->list($this->dashboardData($url)['history']));
+            }
+            $this->assertGreaterThan($samples, $later, 'it keeps measuring while it runs');
+        } finally {
+            $server->stop();
+        }
+        $this->assertFalse(@file_get_contents($url . 'data.json'), 'and stops with the command');
+    }
+
+    public function testWithoutADirectoryTheMonitorTakesWhatItWouldSuggest(): void
+    {
+        $sites = $this->work . '/sites';
+        Files::makeDir($sites);
+        Files::makeDir($this->work . '/home');
+        $json = ['store:monitor', '--format=json'];
+
+        // No terminal to ask in: the suggestion. Without ~/Developer, the current directory.
+        $result = $this->runComposer($sites, $json, env: ['HOME' => $this->work . '/home']);
+        $this->assertSame(0, $result->exitCode, $result->describe());
+        $this->assertSame(realpath($sites), $this->json($result)['dir']);
+
+        Files::makeDir($this->work . '/home/Developer');
+        $result = $this->runComposer($sites, $json, env: ['HOME' => $this->work . '/home']);
+        $this->assertSame(0, $result->exitCode, $result->describe());
+        $this->assertSame(realpath($this->work . '/home/Developer'), $this->json($result)['dir']);
+    }
+
+    public function testAGlobalInstallAddsAComposerStoreCommand(): void
+    {
+        $command = $this->env->pluginHome . '/vendor/bin/composer-store';
+        $this->assertFileExists($command, "Composer links the plugin's bin into its global vendor/bin");
+
+        $result = Process::run([PHP_BINARY, $command, 'status', '--format=json'], $this->work, [
+            'COMPOSER_HOME' => $this->env->pluginHome,
+            'COMPOSER_CACHE_DIR' => $this->env->cache,
+            'COMPOSER_STORE_DIR' => $this->store,
+            'COMPOSER_STORE_COMPOSER' => $this->env->composer->binary(),
+        ] + getenv());
+
+        $this->assertSame(0, $result->exitCode, $result->describe());
+        // The store does not exist yet: compare the directory it would be in.
+        $store = $this->string($this->json($result)['store']);
+        $this->assertSame('store', basename($store));
+        $this->assertSame(realpath($this->work), realpath(dirname($store)));
+    }
+
+    public function testMonitorRejectsADirectoryThatDoesNotExist(): void
+    {
+        $result = $this->runComposer($this->work, ['store:monitor', $this->work . '/missing', '--once']);
+
+        $this->assertSame(1, $result->exitCode);
+        $this->assertStringContainsString('is not a directory', $result->stderr);
     }
 
     public function testUnknownFormatsAreRejected(): void
@@ -259,6 +388,27 @@ final class CommandsTest extends IntegrationTestCase
     private static function text(ProcessResult $result): string
     {
         return str_replace("\r\n", "\n", $result->stdout);
+    }
+
+    /**
+     * @return array<mixed>
+     */
+    private function dashboardData(string $url): array
+    {
+        $data = json_decode((string) file_get_contents($url . 'data.json'), true);
+        $this->assertIsArray($data);
+
+        return $data;
+    }
+
+    /**
+     * @return array<mixed>
+     */
+    private function list(mixed $value): array
+    {
+        $this->assertIsArray($value);
+
+        return $value;
     }
 
     private function string(mixed $value): string
