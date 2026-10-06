@@ -1,0 +1,673 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>composer-store dashboard</title>
+<style nonce="{{nonce}}">
+:root {
+  color-scheme: light;
+  --page: #f9f9f7;
+  --surface: #fcfcfb;
+  --ink: #0b0b0b;
+  --ink-2: #52514e;
+  --muted: #898781;
+  --grid: #e1e0d9;
+  --axis: #c3c2b7;
+  --border: rgba(11, 11, 11, 0.10);
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --good: #0ca30c;
+  --critical: #d03b3b;
+}
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) {
+    color-scheme: dark;
+    --page: #0d0d0d;
+    --surface: #1a1a19;
+    --ink: #ffffff;
+    --ink-2: #c3c2b7;
+    --grid: #2c2c2a;
+    --axis: #383835;
+    --border: rgba(255, 255, 255, 0.10);
+    --series-1: #3987e5;
+    --series-2: #d95926;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #0d0d0d;
+  --surface: #1a1a19;
+  --ink: #ffffff;
+  --ink-2: #c3c2b7;
+  --grid: #2c2c2a;
+  --axis: #383835;
+  --border: rgba(255, 255, 255, 0.10);
+  --series-1: #3987e5;
+  --series-2: #d95926;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--page);
+  color: var(--ink);
+  font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+.wrap { max-width: 1160px; margin: 0 auto; padding: 24px 16px 48px; }
+header {
+  display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between;
+  gap: 8px 24px; margin-bottom: 16px;
+}
+h1 { font-size: 18px; font-weight: 600; margin: 0; }
+.dir { color: var(--ink-2); overflow-wrap: anywhere; }
+.status { display: inline-flex; align-items: center; gap: 8px; color: var(--ink-2); font-size: 13px; padding-top: 3px; }
+.status svg { width: 10px; height: 10px; flex: none; }
+.live { fill: var(--good); }
+.stopped { fill: var(--critical); }
+.note { margin: 0 0 16px; padding: 10px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); color: var(--ink-2); }
+.note[hidden] { display: none; }
+.hero { margin: 4px 0 20px; }
+.hero .label, .tile .label { color: var(--ink-2); font-size: 13px; }
+.hero .value { font-size: 56px; font-weight: 600; line-height: 1.1; letter-spacing: -0.01em; }
+.hero .sub { color: var(--ink-2); }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin-bottom: 16px; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px; min-width: 0; }
+.tile .value { font-size: 24px; font-weight: 600; margin-top: 2px; }
+.tile .sub { color: var(--ink-2); font-size: 12px; margin-top: 2px; }
+svg.spark { display: block; width: 100%; height: 28px; margin-top: 10px; }
+.spark-line { fill: none; stroke: var(--muted); stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; }
+.cards { display: grid; gap: 16px; }
+.card h2 { font-size: 15px; font-weight: 600; margin: 0 0 2px; }
+.desc { color: var(--ink-2); font-size: 13px; margin: 0 0 12px; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 18px; margin: 0 0 8px; color: var(--ink-2); font-size: 13px; }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.legend svg { width: 16px; height: 10px; }
+svg.chart { display: block; width: 100%; overflow: visible; }
+.grid-line { stroke: var(--grid); stroke-width: 1; }
+.axis { stroke: var(--axis); stroke-width: 1; }
+.tick { fill: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.s1 { stroke: var(--series-1); }
+.s2 { stroke: var(--series-2); }
+.f1 { fill: var(--series-1); }
+.f2 { fill: var(--series-2); }
+.dot { stroke: var(--surface); stroke-width: 2; }
+.end-label, .val { fill: var(--ink-2); font-size: 12px; font-variant-numeric: tabular-nums; }
+.name { fill: var(--ink); font-size: 12px; }
+.crosshair { stroke: var(--axis); stroke-width: 1; }
+.hit { fill: transparent; cursor: crosshair; outline: none; }
+.hit:focus-visible { stroke: var(--axis); stroke-width: 1; }
+.bar.lift { opacity: 0.8; }
+.tooltip {
+  position: fixed; z-index: 10; pointer-events: none; min-width: 150px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+  padding: 8px 10px; font-size: 12px; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.14);
+}
+.tooltip[hidden] { display: none; }
+.tooltip .title { color: var(--ink-2); margin-bottom: 4px; }
+.tooltip .row { display: flex; align-items: center; gap: 8px; }
+.tooltip strong { font-variant-numeric: tabular-nums; }
+.tooltip .row span:last-child { color: var(--ink-2); }
+.key { width: 12px; height: 2px; border-radius: 1px; flex: none; }
+.bg1 { background: var(--series-1); }
+.bg2 { background: var(--series-2); }
+.table-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; margin-top: 8px; }
+th, td { padding: 7px 10px; border-bottom: 1px solid var(--grid); text-align: right; white-space: nowrap; }
+th:first-child, td:first-child { text-align: left; white-space: normal; overflow-wrap: anywhere; min-width: 9em; }
+th { color: var(--ink-2); font-size: 12px; font-weight: 600; }
+tfoot td { font-weight: 600; border-bottom: none; }
+tfoot tr:first-child td { border-top: 1px solid var(--axis); }
+tfoot .sum td { font-weight: 400; color: var(--ink-2); padding-top: 4px; padding-bottom: 4px; }
+tfoot .sum.strong td { font-weight: 600; color: var(--ink); }
+details summary { cursor: pointer; color: var(--ink-2); font-size: 13px; margin-top: 10px; }
+.empty { color: var(--ink-2); padding: 16px 0; }
+.empty[hidden] { display: none; }
+.stale .hero, .stale .card { opacity: 0.55; }
+@media (max-width: 560px) { .hero .value { font-size: 44px; } }
+</style>
+</head>
+<body>
+<div class="wrap" id="app">
+  <header>
+    <div>
+      <h1>composer-store</h1>
+      <div class="dir" id="dir">Connecting</div>
+    </div>
+    <div class="status" role="status" aria-live="polite">
+      <svg viewBox="0 0 10 10" aria-hidden="true" id="status-icon"><circle cx="5" cy="5" r="5" class="live"></circle></svg>
+      <span id="status-text">Connecting</span>
+    </div>
+  </header>
+
+  <p class="note" id="note" hidden></p>
+
+  <section class="hero" aria-label="Disk space saved">
+    <div class="label">Saved by the store</div>
+    <div class="value" id="saved">?</div>
+    <div class="sub" id="saved-sub"></div>
+  </section>
+
+  <section class="tiles">
+    <div class="card tile">
+      <div class="label">Without the store</div>
+      <div class="value" id="without">?</div>
+      <div class="sub">These vendor/ directories as separate copies, as Finder counts them</div>
+    </div>
+    <div class="card tile">
+      <div class="label">With the store</div>
+      <div class="value" id="with">?</div>
+      <div class="sub" id="with-sub"></div>
+    </div>
+    <div class="card tile">
+      <div class="label">Store</div>
+      <div class="value" id="store">?</div>
+      <div class="sub" id="store-sub"></div>
+    </div>
+    <div class="card tile">
+      <div class="label">Disk free, measured</div>
+      <div class="value" id="free">?</div>
+      <div class="sub" id="free-sub"></div>
+      <svg class="spark" id="spark" aria-hidden="true"></svg>
+    </div>
+  </section>
+
+  <div class="cards">
+    <section class="card">
+      <h2>Disk use over time</h2>
+      <p class="desc">What the vendor/ directories below take, measured every <span id="interval">2</span> s since the dashboard started.</p>
+      <div class="legend">
+        <span><svg viewBox="0 0 16 10" aria-hidden="true"><line x1="1" y1="5" x2="15" y2="5" class="line s1"></line></svg>Without the store</span>
+        <span><svg viewBox="0 0 16 10" aria-hidden="true"><line x1="1" y1="5" x2="15" y2="5" class="line s2"></line></svg>With the store</span>
+      </div>
+      <svg class="chart" id="trend" role="img" aria-label="Disk use of these vendor directories over time, with and without the store"></svg>
+      <details>
+        <summary>Show as a table</summary>
+        <div class="table-wrap"><table id="trend-table"></table></div>
+      </details>
+    </section>
+
+    <section class="card">
+      <h2>Projects</h2>
+      <p class="desc">Each project's vendor/ as separate copies, against the data it holds of its own: what it really adds to the disk.</p>
+      <div class="legend">
+        <span><svg viewBox="0 0 16 10" aria-hidden="true"><rect x="1" y="1" width="14" height="8" rx="2" class="f1"></rect></svg>Size as copies</span>
+        <span><svg viewBox="0 0 16 10" aria-hidden="true"><rect x="1" y="1" width="14" height="8" rx="2" class="f2"></rect></svg>Own data</span>
+      </div>
+      <svg class="chart" id="bars" role="img" aria-label="Each project's size as copies against its own data"></svg>
+      <div class="empty" id="empty" hidden>No Composer projects here yet. Create one in this directory, then run composer install in it.</div>
+      <div class="table-wrap"><table id="projects"></table></div>
+    </section>
+  </div>
+</div>
+<div class="tooltip" id="tooltip" hidden></div>
+
+<script nonce="{{nonce}}">
+(() => {
+  'use strict';
+
+  const SVG_NS = 'http://www.w3.org/2000/svg';
+  const KIB = 1024, MIB = KIB * 1024, GIB = MIB * 1024;
+  const TREND = [
+    { key: 'vendor-bytes', name: 'Without the store', cls: '1' },
+    { key: 'with-store-bytes', name: 'With the store', cls: '2' },
+  ];
+  const BARS = [
+    { key: 'vendor-bytes', name: 'Size as copies', cls: '1' },
+    { key: 'own-bytes', name: 'Own data', cls: '2' },
+  ];
+
+  const $ = (id) => document.getElementById(id);
+  const tip = $('tooltip');
+  let data = null;
+  let receivedAt = 0;
+  let interval = 2;
+  let failures = 0;
+  let live = false;
+  let hover = null;
+
+  // Formatting --------------------------------------------------------------------------------
+
+  function bytes(value) {
+    if (value === null || value === undefined) {
+      return '?';
+    }
+    const size = Math.abs(value);
+    if (size >= GIB) return (value / GIB).toFixed(1) + ' GiB';
+    if (size >= MIB) return (value / MIB).toFixed(1) + ' MiB';
+    if (size >= KIB) return (value / KIB).toFixed(1) + ' KiB';
+    return value + ' B';
+  }
+
+  function count(value) {
+    return value === null || value === undefined ? '?' : value.toLocaleString('en-US');
+  }
+
+  function duration(seconds) {
+    const s = Math.max(0, Math.floor(seconds));
+    const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), rest = s % 60;
+    return (h > 0 ? h + ':' + String(m).padStart(2, '0') : String(m)) + ':' + String(rest).padStart(2, '0');
+  }
+
+  function projectName(project, root) {
+    return project.dir === root ? project.dir.split('/').pop() : project.dir.slice(root.length + 1);
+  }
+
+  function fromStore(project) {
+    if (project['from-store'] === null) return '?';
+    const how = { reflink: ' (reflinks)', hardlink: ' (hard links)', mixed: ' (both)' }[project['linked-by']] || '';
+    return count(project['from-store']) + how;
+  }
+
+  function storeSummary(project) {
+    if (project['from-store'] === null) return 'clones not visible here';
+    return count(project['from-store']) + ' of ' + count(project.packages) + ' packages from the store';
+  }
+
+  // SVG and DOM helpers ---------------------------------------------------------------------
+
+  function svg(tag, attrs, parent) {
+    const node = document.createElementNS(SVG_NS, tag);
+    for (const [name, value] of Object.entries(attrs)) node.setAttribute(name, String(value));
+    parent.appendChild(node);
+    return node;
+  }
+
+  function svgText(attrs, content, parent) {
+    const node = svg('text', attrs, parent);
+    node.textContent = content;
+    return node;
+  }
+
+  function setText(id, content) {
+    $(id).textContent = content;
+  }
+
+  const measureContext = document.createElement('canvas').getContext('2d');
+  function textWidth(content) {
+    measureContext.font = '12px system-ui, -apple-system, "Segoe UI", sans-serif';
+    return measureContext.measureText(content).width;
+  }
+
+  function fit(content, width) {
+    if (textWidth(content) <= width) return content;
+    let cut = content;
+    while (cut.length > 1 && textWidth('…' + cut) > width) cut = cut.slice(1);
+    return '…' + cut;
+  }
+
+  function niceStep(max, ticks) {
+    const raw = max / ticks;
+    const power = Math.pow(10, Math.floor(Math.log10(raw)));
+    for (const factor of [1, 2, 2.5, 5, 10]) {
+      if (factor * power >= raw) return factor * power;
+    }
+    return 10 * power;
+  }
+
+  function chartWidth(node) {
+    return Math.max(300, Math.floor(node.getBoundingClientRect().width || node.parentNode.clientWidth));
+  }
+
+  // A bar from a square baseline to a 4px rounded data end.
+  function barPath(x, y, width, height) {
+    if (width <= 0) return '';
+    const r = Math.min(4, width, height / 2);
+    return 'M' + x + ',' + y + 'H' + (x + width - r) + 'Q' + (x + width) + ',' + y + ' ' + (x + width) + ',' + (y + r)
+      + 'V' + (y + height - r) + 'Q' + (x + width) + ',' + (y + height) + ' ' + (x + width - r) + ',' + (y + height)
+      + 'H' + x + 'Z';
+  }
+
+  // Tooltip ----------------------------------------------------------------------------------
+
+  function showTip(title, rows, clientX, clientY) {
+    tip.replaceChildren();
+    const head = document.createElement('div');
+    head.className = 'title';
+    head.textContent = title;
+    tip.appendChild(head);
+    for (const row of rows) {
+      const line = document.createElement('div');
+      line.className = 'row';
+      const key = document.createElement('span');
+      key.className = 'key bg' + row.cls;
+      const value = document.createElement('strong');
+      value.textContent = row.value;
+      const name = document.createElement('span');
+      name.textContent = row.name;
+      line.append(key, value, name);
+      tip.appendChild(line);
+    }
+    tip.hidden = false;
+    const width = tip.offsetWidth, height = tip.offsetHeight;
+    let left = clientX + 14, top = clientY + 14;
+    if (left + width > window.innerWidth - 8) left = clientX - width - 14;
+    if (top + height > window.innerHeight - 8) top = clientY - height - 14;
+    tip.style.left = Math.max(8, left) + 'px';
+    tip.style.top = Math.max(8, top) + 'px';
+  }
+
+  function hideTip() {
+    tip.hidden = true;
+  }
+
+  // Trend chart: one axis, two series, crosshair and tooltip --------------------------------
+
+  function renderTrend(history) {
+    const node = $('trend');
+    const width = chartWidth(node), height = 240;
+    const m = { left: 64, right: width < 480 ? 74 : 88, top: 12, bottom: 26 };
+    const ticks = Math.max(1, Math.min(4, Math.floor((width - m.left - m.right) / 90)));
+    node.setAttribute('viewBox', '0 0 ' + width + ' ' + height);
+    node.setAttribute('height', height);
+    node.replaceChildren();
+    if (history.length === 0) return;
+
+    // From the dashboard's start, until the first two hours drop out of the history.
+    const t0 = history[0].t < 60 ? 0 : history[0].t;
+    const t1 = Math.max(history[history.length - 1].t, t0 + interval * 5);
+    let max = 0;
+    for (const sample of history) {
+      for (const series of TREND) {
+        if (sample[series.key] !== null) max = Math.max(max, sample[series.key]);
+      }
+    }
+    const [unit, unitName] = max >= GIB ? [GIB, 'GiB'] : max >= MIB ? [MIB, 'MiB'] : [KIB, 'KiB'];
+    const step = niceStep(Math.max(max, unit) / unit, 5) * unit;
+    const top = Math.max(step, Math.ceil(max / step) * step);
+    const x = (t) => m.left + (t - t0) / (t1 - t0) * (width - m.left - m.right);
+    const y = (v) => height - m.bottom - v / top * (height - m.top - m.bottom);
+
+    for (let v = 0; v <= top + step / 2; v += step) {
+      svg('line', { x1: m.left, x2: width - m.right, y1: y(v), y2: y(v), class: v === 0 ? 'axis' : 'grid-line' }, node);
+      const label = (v / unit).toLocaleString('en-US', { maximumFractionDigits: 1 }) + ' ' + unitName;
+      svgText({ x: m.left - 8, y: y(v) + 4, 'text-anchor': 'end', class: 'tick' }, label, node);
+    }
+    for (let i = 0; i <= ticks; i++) {
+      const t = t0 + (t1 - t0) * i / ticks;
+      const anchor = i === 0 ? 'start' : i === ticks ? 'end' : 'middle';
+      svgText({ x: x(t), y: height - 6, 'text-anchor': anchor, class: 'tick' }, duration(t), node);
+    }
+
+    const ends = [];
+    for (const series of TREND) {
+      const points = history.filter((sample) => sample[series.key] !== null);
+      if (points.length === 0) continue;
+      const d = points.map((p, i) => (i === 0 ? 'M' : 'L') + x(p.t).toFixed(1) + ',' + y(p[series.key]).toFixed(1)).join('');
+      svg('path', { d: d, class: 'line s' + series.cls }, node);
+      const last = points[points.length - 1];
+      svg('circle', { cx: x(last.t), cy: y(last[series.key]), r: 4, class: 'dot f' + series.cls }, node);
+      ends.push({ x: x(last.t), y: y(last[series.key]), label: bytes(last[series.key]) });
+    }
+    // Direct labels at the line ends, unless they would collide: the legend and tooltip carry them then.
+    if (ends.length < 2 || Math.abs(ends[0].y - ends[1].y) >= 16) {
+      for (const end of ends) svgText({ x: end.x + 8, y: end.y + 4, class: 'end-label' }, end.label, node);
+    }
+
+    const cross = svg('line', { y1: m.top, y2: height - m.bottom, class: 'crosshair', visibility: 'hidden' }, node);
+    const hit = svg('rect', {
+      x: m.left, y: m.top, width: width - m.left - m.right, height: height - m.top - m.bottom,
+      class: 'hit', tabindex: 0, 'aria-label': 'Move through the measurements with the arrow keys',
+    }, node);
+    let index = history.length - 1;
+    const show = (i, clientX, clientY) => {
+      index = Math.max(0, Math.min(history.length - 1, i));
+      const sample = history[index];
+      cross.setAttribute('x1', x(sample.t));
+      cross.setAttribute('x2', x(sample.t));
+      cross.setAttribute('visibility', 'visible');
+      const rows = TREND.map((series) => ({ cls: series.cls, name: series.name, value: bytes(sample[series.key]) }));
+      showTip(duration(sample.t) + ' after the start', rows, clientX, clientY);
+    };
+    const nearest = (px) => {
+      let best = 0, distance = Infinity;
+      history.forEach((sample, i) => {
+        const d = Math.abs(x(sample.t) - px);
+        if (d < distance) { distance = d; best = i; }
+      });
+      return best;
+    };
+    const fromPointer = (clientX, clientY) => {
+      const box = node.getBoundingClientRect();
+      show(nearest((clientX - box.left) * width / box.width), clientX, clientY);
+    };
+    const atIndex = (i) => {
+      const box = node.getBoundingClientRect();
+      const sample = history[Math.max(0, Math.min(history.length - 1, i))];
+      show(i, box.left + x(sample.t) * box.width / width, box.top + m.top);
+    };
+    hit.addEventListener('pointermove', (event) => {
+      hover = { chart: 'trend', x: event.clientX, y: event.clientY };
+      fromPointer(event.clientX, event.clientY);
+    });
+    hit.addEventListener('pointerleave', () => { hover = null; cross.setAttribute('visibility', 'hidden'); hideTip(); });
+    hit.addEventListener('focus', () => atIndex(index));
+    hit.addEventListener('blur', () => { cross.setAttribute('visibility', 'hidden'); hideTip(); });
+    hit.addEventListener('keydown', (event) => {
+      if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+        event.preventDefault();
+        atIndex(index + (event.key === 'ArrowLeft' ? -1 : 1));
+      }
+    });
+    if (hover && hover.chart === 'trend') fromPointer(hover.x, hover.y);
+  }
+
+  function renderTrendTable(history) {
+    const table = $('trend-table');
+    table.replaceChildren();
+    const head = table.createTHead().insertRow();
+    for (const title of ['After the start', 'Without the store', 'With the store', 'Disk free']) {
+      const th = document.createElement('th');
+      th.textContent = title;
+      head.appendChild(th);
+    }
+    const body = table.createTBody();
+    for (const sample of history.slice(-30).reverse()) {
+      const row = body.insertRow();
+      for (const value of [duration(sample.t), bytes(sample['vendor-bytes']), bytes(sample['with-store-bytes']), bytes(sample['free-bytes'])]) {
+        row.insertCell().textContent = value;
+      }
+    }
+  }
+
+  // Project bars: paired, size as copies against own data -----------------------------------
+
+  function renderBars(snapshot) {
+    const node = $('bars');
+    const projects = snapshot.projects;
+    node.replaceChildren();
+    $('empty').hidden = projects.length > 0;
+    if (projects.length === 0) {
+      node.setAttribute('height', 0);
+      return;
+    }
+    const width = chartWidth(node);
+    const barHeight = 12, gap = 2, rowGap = 18, valueWidth = 76;
+    const pair = barHeight * 2 + gap;
+    const height = projects.length * (pair + rowGap) - rowGap + 4;
+    node.setAttribute('viewBox', '0 0 ' + width + ' ' + height);
+    node.setAttribute('height', height);
+    const names = projects.map((project) => projectName(project, snapshot.dir));
+    const labelWidth = Math.min(width * 0.35, Math.max(...names.map(textWidth)) + 14);
+    const max = Math.max(1, ...projects.map((project) => project['vendor-bytes']));
+    const scale = (value) => value / max * (width - labelWidth - valueWidth);
+
+    projects.forEach((project, row) => {
+      const top = row * (pair + rowGap) + 2;
+      svgText({ x: labelWidth - 12, y: top + pair / 2 + 4, 'text-anchor': 'end', class: 'name' }, fit(names[row], labelWidth - 14), node);
+      BARS.forEach((series, i) => {
+        const value = project[series.key];
+        const y = top + i * (barHeight + gap);
+        const length = value === null ? 0 : Math.max(value > 0 ? 2 : 0, scale(value));
+        const bar = svg('path', { d: barPath(labelWidth, y, length, barHeight), class: 'bar f' + series.cls }, node);
+        svgText({ x: labelWidth + length + 6, y: y + barHeight - 2, class: 'val' }, bytes(value), node);
+        const hit = svg('rect', {
+          x: labelWidth, y: y - gap / 2, width: width - labelWidth, height: barHeight + gap,
+          class: 'hit', tabindex: 0, 'aria-label': names[row] + ', ' + series.name + ': ' + bytes(value),
+        }, node);
+        const title = names[row] + ': ' + storeSummary(project);
+        const rows = [{ cls: series.cls, name: series.name, value: bytes(value) }];
+        hit.addEventListener('pointermove', (event) => { bar.classList.add('lift'); showTip(title, rows, event.clientX, event.clientY); });
+        hit.addEventListener('pointerleave', () => { bar.classList.remove('lift'); hideTip(); });
+        hit.addEventListener('focus', () => {
+          const box = hit.getBoundingClientRect();
+          bar.classList.add('lift');
+          showTip(title, rows, box.left + Math.min(length, box.width), box.top);
+        });
+        hit.addEventListener('blur', () => { bar.classList.remove('lift'); hideTip(); });
+      });
+    });
+  }
+
+  function renderProjectTable(snapshot) {
+    const table = $('projects');
+    table.replaceChildren();
+    if (snapshot.projects.length === 0) return;
+    const head = table.createTHead().insertRow();
+    for (const title of ['Project', 'Packages', 'From the store', 'Size as copies', 'Own data']) {
+      const th = document.createElement('th');
+      th.textContent = title;
+      head.appendChild(th);
+    }
+    const body = table.createTBody();
+    for (const project of snapshot.projects) {
+      const row = body.insertRow();
+      const cells = [projectName(project, snapshot.dir), count(project.packages), fromStore(project), bytes(project['vendor-bytes']), bytes(project['own-bytes'])];
+      for (const value of cells) row.insertCell().textContent = value;
+    }
+    const totals = snapshot.totals;
+    const foot = table.createTFoot();
+    if (snapshot.projects.length > 1) {
+      const row = foot.insertRow();
+      const cells = ['Total', count(totals.packages), count(totals['from-store']), bytes(totals['vendor-bytes']), bytes(totals['own-bytes'])];
+      for (const value of cells) row.insertCell().textContent = value;
+    }
+    // How the space with the store adds up: their own data, plus one copy of the store data they share.
+    const saved = totals['saved-bytes'];
+    const share = saved !== null && totals['vendor-bytes'] > 0
+      ? ' (' + Math.round(100 * saved / totals['vendor-bytes']) + '%)'
+      : '';
+    summaryRow(foot, 'Plus the store data they share, kept once', bytes(snapshot.store['used-bytes']), false);
+    summaryRow(foot, 'With the store, instead of ' + bytes(totals['vendor-bytes']), bytes(totals['with-store-bytes']), true);
+    summaryRow(foot, 'Saved', bytes(saved) + share, true);
+  }
+
+  function summaryRow(foot, label, value, strong) {
+    const row = foot.insertRow();
+    row.className = strong ? 'sum strong' : 'sum';
+    const labelCell = row.insertCell();
+    labelCell.colSpan = 4;
+    labelCell.textContent = label;
+    row.insertCell().textContent = value;
+  }
+
+  // Figures ----------------------------------------------------------------------------------
+
+  function renderSpark(history, startFree) {
+    const node = $('spark');
+    node.replaceChildren();
+    const points = history.filter((sample) => sample['free-bytes'] !== null).slice(-60);
+    if (points.length < 2 || startFree === null) return;
+    const width = chartWidth(node), height = 28;
+    node.setAttribute('viewBox', '0 0 ' + width + ' ' + height);
+    const used = points.map((sample) => startFree - sample['free-bytes']);
+    const low = Math.min(0, ...used), high = Math.max(1, ...used);
+    const x = (i) => 4 + i / (points.length - 1) * (width - 8);
+    const y = (v) => height - 4 - (v - low) / (high - low) * (height - 8);
+    svg('path', { d: used.map((v, i) => (i === 0 ? 'M' : 'L') + x(i).toFixed(1) + ',' + y(v).toFixed(1)).join(''), class: 'spark-line' }, node);
+    svg('circle', { cx: x(used.length - 1), cy: y(used[used.length - 1]), r: 3, class: 'dot f1' }, node);
+  }
+
+  function renderFigures(snapshot, startFree) {
+    const totals = snapshot.totals;
+    const saved = totals['saved-bytes'];
+    setText('dir', snapshot.dir);
+    setText('saved', bytes(saved));
+    if (saved === null) {
+      setText('saved-sub', 'Clones cannot be told from copies here, see the note above.');
+    } else if (totals['vendor-bytes'] > 0) {
+      const share = Math.round(100 * saved / totals['vendor-bytes']);
+      setText('saved-sub', share + '% less than the same vendor/ directories without the store');
+    } else {
+      setText('saved-sub', 'Install a project in this directory to compare.');
+    }
+    document.title = 'Saved ' + bytes(saved) + ' - composer-store';
+    setText('without', bytes(totals['vendor-bytes']));
+    setText('with', bytes(totals['with-store-bytes']));
+    setText('with-sub', bytes(snapshot.store['used-bytes']) + ' of store data they share, plus ' + bytes(totals['own-bytes']) + ' of their own');
+    setText('store', bytes(snapshot.store.bytes));
+    setText('store-sub', count(snapshot.store.entries) + ' package versions, ' + bytes(snapshot.store['used-bytes']) + ' of it used by these projects');
+    setText('free', bytes(snapshot['free-bytes']));
+    if (startFree === null || snapshot['free-bytes'] === null || startFree === snapshot['free-bytes']) {
+      setText('free-sub', 'No change since the dashboard started');
+    } else {
+      const change = startFree - snapshot['free-bytes'];
+      setText('free-sub', bytes(Math.abs(change)) + (change > 0 ? ' used' : ' freed') + ' since the dashboard started, by everything on this disk');
+    }
+    const notes = [];
+    if (totals['saved-bytes'] === null) {
+      notes.push('Clones look like copies here. On macOS, start the dashboard with a PHP that has the FFI extension to see what each project shares.');
+    }
+    if (!snapshot['same-filesystem']) {
+      notes.push('The store is on another filesystem than this directory, so installs here copy instead of linking.');
+    }
+    $('note').hidden = notes.length === 0;
+    setText('note', notes.join(' '));
+  }
+
+  // Status, polling, rendering --------------------------------------------------------------
+
+  function renderStatus() {
+    const icon = $('status-icon');
+    icon.replaceChildren();
+    if (live) {
+      svg('circle', { cx: 5, cy: 5, r: 5, class: 'live' }, icon);
+      const elapsed = data ? data.elapsed + (Date.now() - receivedAt) / 1000 : 0;
+      setText('status-text', 'Live, measuring every ' + interval + ' s for ' + duration(elapsed));
+    } else {
+      svg('rect', { x: 0, y: 0, width: 10, height: 10, rx: 2, class: 'stopped' }, icon);
+      setText('status-text', data ? 'Stopped: the command ended. Start it again to resume.' : 'Waiting for the dashboard command');
+    }
+    document.body.classList.toggle('stale', !live && data !== null);
+  }
+
+  function render() {
+    if (!data || !data.snapshot) return;
+    renderFigures(data.snapshot, data['start-free-bytes']);
+    renderTrend(data.history);
+    renderTrendTable(data.history);
+    renderBars(data.snapshot);
+    renderProjectTable(data.snapshot);
+    renderSpark(data.history, data['start-free-bytes']);
+    setText('interval', String(interval));
+  }
+
+  async function poll() {
+    try {
+      const response = await fetch('data.json', { cache: 'no-store' });
+      if (!response.ok) throw new Error('HTTP ' + response.status);
+      data = await response.json();
+      receivedAt = Date.now();
+      interval = data.interval || interval;
+      failures = 0;
+      live = true;
+      render();
+    } catch (error) {
+      failures++;
+      if (failures >= 2 || !data) live = false;
+    }
+    renderStatus();
+    setTimeout(poll, interval * 1000);
+  }
+
+  let resizeTimer = 0;
+  window.addEventListener('resize', () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(render, 150);
+  });
+  setInterval(() => { if (live) renderStatus(); }, 1000);
+  poll();
+})();
+</script>
+</body>
+</html>

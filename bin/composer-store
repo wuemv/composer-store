@@ -1,0 +1,25 @@
+#!/usr/bin/env php
+<?php
+
+/**
+ * The composer-store command, which a global install links into Composer's vendor/bin:
+ * `composer-store dashboard` runs `composer store:dashboard`, and so on. See ComposerStore\Launcher.
+ */
+
+declare(strict_types=1);
+
+// Composer's bin proxies name the autoloader since 2.2; before, this file is reached through a symlink.
+$candidates = [
+    $GLOBALS['_composer_autoload_path'] ?? null,
+    __DIR__ . '/../../../autoload.php',
+    __DIR__ . '/../vendor/autoload.php',
+];
+foreach ($candidates as $autoload) {
+    if (is_string($autoload) && is_file($autoload)) {
+        require $autoload;
+        $args = is_array($_SERVER['argv'] ?? null) ? array_slice($_SERVER['argv'], 1) : [];
+        exit((new ComposerStore\Launcher())->run(array_values(array_filter($args, 'is_string'))));
+    }
+}
+fwrite(STDERR, "composer-store: cannot find Composer's autoloader\n");
+exit(1);

@@ -11,7 +11,7 @@ PHP still sees ordinary files inside `vendor/`: `__DIR__`, relative includes, au
 - Composer 2.0 or later. Tested with 2.0, 2.2, 2.8 and 2.10.
 - PHP 8.1 or later.
 - Linux, macOS or Windows.
-- On macOS, PHP's FFI extension, so the plugin can clone each package with one `clonefile(2)` call. Without it, the plugin runs `cp` for each package, which places the files ten times slower: 2.3 s instead of 0.23 s for the 148 packages of the benchmarks. `php -m` lists `FFI` when you have it; PHP allows it on the command line by default.
+- On macOS, PHP's FFI extension, so the plugin can clone each package with one `clonefile(2)` call. Without it, the plugin runs `cp` for each package, which places the files ten times slower: 2.3 s instead of 0.23 s for the 148 packages of the benchmarks. `php -m` lists `FFI` when you have it; PHP allows it on the command line by default. `store:monitor` needs it too, to tell clones from copies.
 - The store and your projects on the same filesystem, since links cannot cross filesystems. Elsewhere, Composer installs as usual, with a warning.
 
 ## Install
@@ -127,9 +127,13 @@ These are never linked. Composer installs them as it would without the plugin:
 composer store:status            # where the store is, its size, and the disk space it saves
 composer store:verify            # re-hashes the store, reports files that changed
 composer store:prune             # lists the versions no project uses; --force deletes them
+composer store:monitor [dir]     # watches the projects in a directory: what each takes on disk, live
+composer store:dashboard [dir]   # the same, as live charts in your browser
 ```
 
-All three take `--format=json` and work inside or outside a project.
+All of them work inside or outside a project, and all but `store:dashboard` take `--format=json`.
+
+A global install also adds a `composer-store` command, in Composer's global `vendor/bin` next to `laravel` and `valet`, which must be on your PATH (it is when those work): `composer-store dashboard` runs `composer store:dashboard`, and so on, with the same options. On macOS, when the PHP it runs on has no FFI, it runs Composer with a PHP of the same version on your PATH that has it, such as Herd's, so the monitor can tell clones from copies. `COMPOSER_STORE_PHP` and `COMPOSER_STORE_COMPOSER` name the PHP and Composer to use instead.
 
 ```
 $ composer store:status
@@ -146,6 +150,38 @@ Settings:     mode auto, read-only off
 `store:verify [packages...]` exits with 1 when a store entry no longer matches the hash taken when it was stored, and lists the files modified since. To repair one, delete its directory, then run `composer reinstall <package>` in each project that uses it.
 
 `store:prune` only lists what it would delete. With `--force`, it deletes the versions no project uses: none of their files is linked from a `vendor/`, and no project in `projects.json` lists them. It also cleans up leftovers of interrupted installs, and forgets registered projects whose directory is gone. It waits for running installs, and installs that start meanwhile wait for it.
+
+`store:monitor <dir>` watches the Composer projects in a directory and up to three levels below it, and redraws every 2 seconds (`--interval`) while you install, update or remove packages in another terminal. `--once` measures once. It looks at the files themselves rather than at what the store remembers, so a project installed without the plugin shows as copies, like `app-3` here:
+
+```
+$ composer store:monitor ~/Sites
+Watching for 00:00:12, every 2 s. Ctrl+C stops.
+Projects in /Users/me/Sites
+
+Disk:    34.8 GiB free, 29.1 MiB used since the monitor started
+Store:   103.9 MiB in 180 package versions, 103.9 MiB of it used by these projects
+
+Project      Packages   From the store   Finder size    Own data
+app-1             132   131 (reflinks)      78.1 MiB     2.8 MiB
+app-2             132   131 (reflinks)      78.1 MiB     2.8 MiB
+app-3             132                0      78.1 MiB    78.1 MiB
+laravel-12        111   111 (reflinks)      64.7 MiB   428.0 KiB
+Total             507              373     299.1 MiB    84.1 MiB
+
+Without the store, these vendor/ directories take 299.1 MiB.
+With the store, they take 188.0 MiB: 103.9 MiB of store data they share, plus 84.1 MiB of their own.
+Saved: 111.1 MiB (37%)
+```
+
+*Finder size* is what Finder and `du` show for a `vendor/`: every file at its full size, clones included. *Own data* is what the project takes that no other file shares, such as Composer's autoloader. The disk line is measured, not computed: the free space, and how much it changed since the monitor started. The monitor takes no lock, so installs never wait for it.
+
+Without a directory, both ask for one and suggest `~/Developer` (or, where there is none, the current directory): press Enter to take it. Without a terminal to ask in, they take the suggestion.
+
+The first measurement reads every file, which takes a while for many projects: about 35 seconds for 100 projects and a million files on an Apple-silicon Mac, with its progress shown. After that, they measure again only the projects whose `vendor/` changed or that lost a store entry they linked, plus one other per refresh, so a refresh takes a fraction of a second.
+
+A package comes from the store when its files are hard links of the store's (same inode) or clones of them (same clone ID). On macOS, telling a clone from a copy takes PHP's FFI extension: without it, the monitor shows `?` in those columns. On Linux, it sees hard links, not yet reflinks.
+
+`store:dashboard <dir>` measures the same way and shows it as live charts in your browser: the space saved, the projects' `vendor/` directories with and without the store over time, the measured free space, and each project's size against the data it holds of its own, with a table under each chart. It serves the page on `127.0.0.1` only, at any free port (`--port` picks one), and opens it unless you pass `--no-open`. It measures only while it runs: Ctrl+C stops the measuring and the page together, and nothing stays in the background. The page needs nothing from the internet.
 
 ## Uninstall
 

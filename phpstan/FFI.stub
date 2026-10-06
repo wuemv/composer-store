@@ -4,6 +4,7 @@
  * The C functions called through FFI::cdef(), which PHP resolves at run time.
  *
  * @method int clonefile(string $src, string $dst, int $flags) macOS: clone a file or a directory tree
+ * @method int getattrlist(string $path, FFI\CData $list, FFI\CData $buf, int $size, int $options) macOS: file attributes
  * @method array<int, int> __error() macOS: a pointer to errno
  * @method FFI\CData strerror(int $errnum) the message for an errno
  */
