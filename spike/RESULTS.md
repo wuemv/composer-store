@@ -2,6 +2,8 @@
 
 Run on 2026-10-04 with `spike/run.sh` (driver) and `spike/spike.php` (store, link, verify, report).
 The full run was done twice from scratch. Both runs gave the same results; only the timings moved.
+A control run with symlinked package dirs followed on 2026-10-05, with `spike/symlink-control.sh`:
+see [Control run: symlinked package dirs](#control-run-symlinked-package-dirs).
 
 ## Verdict
 
@@ -11,6 +13,8 @@ behaves exactly like a normal install:
 - In 3 fresh apps, 16 checks each, all passed before and after linking (98 of 98 runs).
 - No package broke, and no package needed special handling.
 - Nothing the apps or Composer did wrote into the store, and files copied out of `vendor/` came out as independent files.
+- The control, symlinked package dirs, fails: `php artisan test` breaks in both apps tried. The store links
+  files, never package directories.
 
 ## Setup
 
@@ -155,20 +159,85 @@ That is **46% less** for this mix of two identical apps and one app on an older 
    - `tools/github-dist-shim` (a sandbox-only global plugin) builds the same zips with `git archive` from the same commits.
    - The integration tests (real `composer install` runs) will need it in such sandboxes. GitHub Actions won't.
 
+## Control run: symlinked package dirs
+
+Run on 2026-10-05 with `spike/symlink-control.sh` on macOS (APFS), PHP 8.4.25, Composer 2.10.2. The spike
+above kept package directories real and linked their files. This run tests the alternative, the one the
+no-symlinks rule had only argued against: `vendor/<vendor>/` stays a real directory, and each
+`vendor/<vendor>/<name>` is a symlink into a shared store. From the outside, that is how pnpm's
+`node_modules` looks.
+
+- Two apps, each copied and installed with plain Composer, in a Composer home without global plugins:
+
+  | app | test runner | package dirs turned into symlinks |
+  |---|---|---|
+  | fresh `laravel/laravel`, Laravel 13.34.0 | PHPUnit 12.5.38 | 109 of 109 |
+  | an app with Pest, Boost and Pail, Laravel 13.34.0 | Pest 5.3.0 | 131 of 132 (`pestphp/pest-plugin` is a Composer plugin) |
+
+- Each app ran the spike's checks (all but `serve`) as installed, then again with every dist package dir
+  moved into a store (same layout as composer-store's) and replaced by a symlink to it. A copy of each app
+  used the same symlinks, so two apps shared one store.
+
+| check | as installed | symlinked, PHPUnit app | symlinked, Pest app |
+|---|---|---|---|
+| `php artisan test` | pass | **fail** | **fail** |
+| `vendor/bin/phpunit`, or `vendor/bin/pest` in the Pest app | pass | pass | **fail** |
+| probe: Laravel's files are inside the app's `vendor/` | pass | **fail** | **fail** |
+| the other 12: `about`, `package:discover`, Pint, `migrate:fresh`, `optimize`, `optimize:clear`, Tinker, three publish commands, `composer dump-autoload -o`, `composer install` | pass | pass | pass |
+
+### Why the test runners fail
+
+- PHP resolves symlinks in `__FILE__` and `__DIR__`, whichever directories above them are real. The probe
+  found `Application.php` at `store/packages/laravel/framework/v13.34.0-c829b4982d29/files/src/…`. `basePath()`
+  was still the app, and discovery still found the same 6 providers.
+- Test runners find the app's autoloader by counting directories up from their own file, and from the store
+  that count lands outside the app:
+  - `php artisan test` (Collision 8.9.5) starts `vendor/phpunit/phpunit/phpunit` or
+    `vendor/pestphp/pest/bin/pest` directly, not through Composer's bin proxy.
+  - PHPUnit uses the autoloader path that Composer's proxy hands it in `$GLOBALS['_composer_autoload_path']`,
+    so `vendor/bin/phpunit` works. Started directly, it tries `__DIR__ . '/../../autoload.php'` and stops with
+    "You need to set up the project dependencies using Composer".
+  - Pest never reads the proxy's path. It tries `dirname(__DIR__, 4).'/vendor/autoload.php'`, then
+    `dirname(__DIR__).'/vendor/autoload.php'`, so both ways end in `include_once(store/packages/pestphp/pest/v5.3.0-14a3efd918e1/files/vendor/autoload.php)`
+    and `Class "Symfony\Component\Console\Input\ArgvInput" not found`.
+- No layout of symlinks fixes this: these runners expect their real directory at exactly
+  `vendor/<vendor>/<name>`. pnpm's way, symlinks to directories elsewhere inside the project, moves the real
+  directory just the same.
+
+### Sharing and lifetime
+
+- An appended line in one app's `vendor/laravel/framework/LICENSE.md` showed up in the other app and in the
+  store. Hard links share edits the same way (finding 3); clones do not.
+- None of the checks wrote into a package directory, so the store got no new files.
+- `composer reinstall laravel/framework` without the plugin removed the symlink, left the store entry
+  complete, and extracted a normal copy in its place.
+- With the store moved away, the second app failed at once:
+  `require(…/vendor/composer/../symfony/polyfill-mbstring/bootstrap.php): Failed to open stream`. It worked
+  again once the store was back. A hard link or a clone keeps its data when the store entry goes, so pruning,
+  deleting the store, or running the app where the store's path does not exist (a container that mounts only
+  the project, a copy on another machine) cannot break it. A symlink can.
+
+Symlinks would save the per-app directory tree that hard links and clones still need (about 5.1 MB per app above), and
+installs would make one symlink per package instead of one link per file. They would cost the test runners
+and tie every app to the store's path. The rule stands: each package directory is real, and its files are
+hard links or clones.
+
 ## Not covered here
 
 - Composer doing the linking itself (custom installer, promises): Phase 1.
 - Lock and atomic rename under concurrent installs; skip rules for patches, path repos and `--prefer-source`; cross-filesystem copy fallback: Phase 2 and the integration tests.
 - Reflinks (ext4 has none), macOS and Windows: Phase 4.
-- A control run with symlinked package dirs, which would show concretely what breaks. It was left out of this spike.
-  The no-symlinks rule rests on PHP resolving symlinks in `__FILE__` and `__DIR__`.
 
 ## Reproducing
 
 ```sh
 spike/run.sh [work-dir]   # prints a summary, writes <work-dir>/results.md and <work-dir>/logs/
+spike/symlink-control.sh <laravel-app> [work-dir]   # the control run, on a copy of any Laravel app
 ```
 
-- It needs network access to Packagist and GitHub and takes about 5 minutes with cold caches.
+- `run.sh` needs network access to Packagist and GitHub and takes about 5 minutes with cold caches. It runs on Linux.
+- `symlink-control.sh` runs on macOS and Linux and needs git and rsync. It installs a copy of the app from the
+  Composer cache, or the network where the cache lacks a package, and never changes the app itself. For the PHPUnit app above:
+  `composer create-project laravel/laravel app`, then `spike/symlink-control.sh app`.
 - When running as root, prefix the command with `COMPOSER_ALLOW_SUPERUSER=1`.
 - Where GitHub archive downloads are blocked, install `tools/github-dist-shim` first.
