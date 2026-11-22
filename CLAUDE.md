@@ -185,7 +185,7 @@ CI (GitHub Actions): Ubuntu + macOS + Windows, PHP 8.1 to latest, at least two C
 
 ## Development
 
-- `composer test` runs the unit and integration suites (no network). `composer test:network` runs the fresh-Laravel-app test, which needs Packagist and GitHub. `composer lint` runs PHPCS (PSR-12) and PHPStan (max level).
+- `composer test` runs the unit and integration suites (no network). `composer test:network` runs the fresh-Laravel-app test, which needs Packagist and GitHub. `composer lint` runs PHPCS (PSR-12) and PHPStan (max level, for PHP 8.1 to 8.5 whichever PHP runs it, so CI and a local PHP 8.3 agree).
 - Integration tests use the `composer` on the PATH, or `COMPOSER_STORE_TEST_COMPOSER=/path/to/composer`. They build a local git-backed fixture repository from `tests/Fixtures/packages/` and install the plugin globally into a throwaway Composer home.
 - Set `COMPOSER_STORE_TEST_KEEP=1` to keep the test temp dirs. `COMPOSER_STORE_TEST_OTHER_FS` points the cross-filesystem tests at a directory on another filesystem (default `/dev/shm`). `COMPOSER_STORE_TEST_REFLINK_DIR` points `ReflinkTest` at a directory with reflinks (Btrfs, XFS); without it, they are real only on APFS.
 - Running Composer as root needs `COMPOSER_ALLOW_SUPERUSER=1`, otherwise plugins are disabled.

@@ -56,6 +56,10 @@ final class CloneInfo
             );
             $list = $ffi->new('uint8_t[' . self::LIST_SIZE . ']');
             $attrs = $ffi->new('uint8_t[' . self::ATTRS_SIZE . ']');
+            // Before PHP 8.4, FFI::new() returns null where it cannot allocate; since, it throws.
+            if ($list === null || $attrs === null) {
+                return null;
+            }
             $request = pack(
                 self::LIST_FORMAT,
                 self::ATTR_BIT_MAP_COUNT,

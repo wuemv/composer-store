@@ -1,5 +1,10 @@
 parameters:
     level: max
+    # Every PHP the plugin supports, whichever PHP runs PHPStan: some signatures differ between versions
+    # (FFI::new() returns null before PHP 8.4 and throws since).
+    phpVersion:
+        min: 80100
+        max: 80599
     paths:
         - src
         - tests
