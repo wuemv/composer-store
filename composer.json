@@ -1,8 +1,14 @@
 {
     "name": "wuemv/composer-store",
-    "description": "A pnpm-style global package store for Composer: each package version is stored once and hard-linked into vendor/.",
+    "description": "A pnpm-style global package store for Composer: each package version is stored once and linked into vendor/ with reflinks or hard links.",
     "type": "composer-plugin",
-    "keywords": ["composer", "plugin", "store", "hardlink", "disk", "vendor"],
+    "keywords": ["composer", "plugin", "store", "pnpm", "hardlink", "reflink", "disk", "vendor"],
+    "homepage": "https://github.com/wuemv/composer-store",
+    "license": "MIT",
+    "support": {
+        "issues": "https://github.com/wuemv/composer-store/issues",
+        "source": "https://github.com/wuemv/composer-store"
+    },
     "require": {
         "php": ">=8.1",
         "composer-plugin-api": "^2.0"

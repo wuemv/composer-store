@@ -160,7 +160,7 @@ As built:
 
 As built:
 
-- `README.md` covers install (Packagist, and from GitHub until it is published there), settings, commands, uninstall and limitations. `.gitattributes` keeps everything but `src/`, `bin/`, `composer.json` and the README out of the dist archives.
+- `README.md` covers install (Packagist, and from GitHub until it is published there), settings, commands, uninstall and limitations. `.gitattributes` keeps everything but `src/`, `bin/`, `composer.json`, the README and `LICENSE` (MIT) out of the dist archives. Releases are `vX.Y.Z` tags on `main`, which Packagist turns into versions; v0.1.0 is the first.
 - `bin/composer-store` (composer.json `bin`, so a global install puts it in Composer's global `vendor/bin`, next to `laravel`) is a bootstrap for `ComposerStore\Launcher`: `composer-store <status|verify|prune|monitor|dashboard> ...` runs `composer store:<command> ...` in the same terminal (stdin, stdout and stderr passed on, so it can ask and draw). On macOS, when its PHP lacks FFI, it runs Composer with the first `php`, `php84` or `php8.4` of the same version on the PATH that has FFI (Herd's, for one); `COMPOSER_STORE_PHP` and `COMPOSER_STORE_COMPOSER` override both choices. A package already installed from a path repository at the same commit only gets the new bin proxy from a fresh install (`composer global remove`, then require it again): `update` and `reinstall` keep its old metadata.
 - `benchmarks/run.php` (with `Benchmark.php`) installs the five projects in `benchmarks/projects/`, whose `composer.json` and `composer.lock` pin every package: offline from a warm Composer cache, `--no-scripts`, with and without `--no-autoloader`, without the plugin and per mode from an empty and a warm store. Disk space is the drop in free space, which counts reflinks right where `du` cannot. `benchmarks/README.md` explains the method, `benchmarks/RESULTS.md` has the numbers.
 - The Benchmarks workflow runs it on ext4, Btrfs and APFS, by hand only (workflow_dispatch), with the results in the job summaries. PHPCS and PHPStan cover `benchmarks/` too.
@@ -185,7 +185,7 @@ CI (GitHub Actions): Ubuntu + macOS + Windows, PHP 8.1 to latest, at least two C
 
 ## Development
 
-- `composer test` runs the unit and integration suites (no network). `composer test:network` runs the fresh-Laravel-app test, which needs Packagist and GitHub. `composer lint` runs PHPCS (PSR-12) and PHPStan (max level).
+- `composer test` runs the unit and integration suites (no network). `composer test:network` runs the fresh-Laravel-app test, which needs Packagist and GitHub. `composer lint` runs PHPCS (PSR-12) and PHPStan (max level, for PHP 8.1 to 8.5 whichever PHP runs it, so CI and a local PHP 8.3 agree).
 - Integration tests use the `composer` on the PATH, or `COMPOSER_STORE_TEST_COMPOSER=/path/to/composer`. They build a local git-backed fixture repository from `tests/Fixtures/packages/` and install the plugin globally into a throwaway Composer home.
 - Set `COMPOSER_STORE_TEST_KEEP=1` to keep the test temp dirs. `COMPOSER_STORE_TEST_OTHER_FS` points the cross-filesystem tests at a directory on another filesystem (default `/dev/shm`). `COMPOSER_STORE_TEST_REFLINK_DIR` points `ReflinkTest` at a directory with reflinks (Btrfs, XFS); without it, they are real only on APFS.
 - Running Composer as root needs `COMPOSER_ALLOW_SUPERUSER=1`, otherwise plugins are disabled.
