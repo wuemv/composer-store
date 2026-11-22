@@ -216,3 +216,7 @@ Five Laravel projects (Laravel 11, 12 and 13, two with extra packages) install 5
 ## Development
 
 `composer test` runs the unit and integration tests, `composer test:network` the tests that need Packagist and GitHub, and `composer lint` PHPCS and PHPStan. [CLAUDE.md](CLAUDE.md) describes the design and the test setup.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
