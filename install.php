@@ -4,7 +4,7 @@
  * Installs composer-store globally, for every project of this user, by running the Composer commands the
  * README lists, then checks that Composer loads the plugin.
  *
- *     php install.php [--from=github|packagist|URL|DIR] [--composer=PATH] [--dry-run]
+ *     php install.php [--from=packagist|github|URL|DIR] [--composer=PATH] [--dry-run]
  *     curl -fsSL https://raw.githubusercontent.com/wuemv/composer-store/HEAD/install.php | php
  *
  * Written in syntax that PHP 7.2, the oldest PHP that runs Composer 2, still parses: an old PHP gets a
@@ -61,7 +61,7 @@ function installComposerStore(array $args): int
 
     $steps = installSteps($options['from'], $version);
     if ($steps === null) {
-        return fail('--from takes github, packagist, a repository URL or a directory, not ' . $options['from'] . '.');
+        return fail('--from takes packagist, github, a repository URL or a directory, not ' . $options['from'] . '.');
     }
     foreach ($steps as $step) {
         if (runComposer($composer, $step, $options['dry-run']) !== 0) {
@@ -106,7 +106,7 @@ function installComposerStore(array $args): int
  */
 function parseOptions(array $args): ?array
 {
-    $options = ['from' => 'github', 'composer' => null, 'dry-run' => false, 'help' => false];
+    $options = ['from' => 'packagist', 'composer' => null, 'dry-run' => false, 'help' => false];
     foreach ($args as $arg) {
         if ($arg === '--dry-run') {
             $options['dry-run'] = true;
@@ -287,8 +287,8 @@ function printUsage($stream): void
         'Installs composer-store globally, for every project of this user.',
         '',
         'Usage: php install.php [options]',
-        '  --from=SOURCE    where to install it from: github (the default, until it is on Packagist),',
-        '                   packagist, a repository URL, or a directory with a clone',
+        '  --from=SOURCE    where to install it from: packagist (the default: the latest release),',
+        '                   github (the main branch), a repository URL, or a directory with a clone',
         '  --composer=PATH  the Composer to run (default: composer on the PATH)',
         '  --dry-run        print the commands without running them',
         '  --help           show this help',

@@ -64,10 +64,11 @@ final class InstallScriptTest extends IntegrationTestCase
         $result = $this->runScript(['--dry-run']);
 
         $this->assertSame(0, $result->exitCode, $result->describe());
+        // From Packagist by default, dropping the repository an install from GitHub leaves behind.
         $commands = [
-            'composer global config repositories.composer-store vcs https://github.com/wuemv/composer-store',
+            'composer global config --unset repositories.composer-store',
             ...$this->allowsPlugins($result) ? ['composer global config allow-plugins.wuemv/composer-store true'] : [],
-            'composer global require --no-interaction wuemv/composer-store:@dev',
+            'composer global require --no-interaction wuemv/composer-store',
         ];
         foreach ($commands as $command) {
             $this->assertStringContainsString('> ' . $command . "\n", $result->stdout);
@@ -76,14 +77,16 @@ final class InstallScriptTest extends IntegrationTestCase
         $this->assertSame($before, file_get_contents($this->home . '/composer.json'));
     }
 
-    public function testFromPackagistDropsTheGitHubRepository(): void
+    public function testFromGitHubInstallsTheMainBranch(): void
     {
-        $result = $this->runScript(['--from=packagist', '--dry-run']);
+        $result = $this->runScript(['--from=github', '--dry-run']);
 
         $this->assertSame(0, $result->exitCode, $result->describe());
         $output = $result->stdout;
-        $this->assertStringContainsString("> composer global config --unset repositories.composer-store\n", $output);
-        $this->assertStringContainsString("> composer global require --no-interaction wuemv/composer-store\n", $output);
+        $repository = 'composer global config repositories.composer-store vcs https://github.com/wuemv/composer-store';
+        $this->assertStringContainsString('> ' . $repository . "\n", $output);
+        $require = 'composer global require --no-interaction wuemv/composer-store:@dev';
+        $this->assertStringContainsString('> ' . $require . "\n", $output);
     }
 
     public function testUnknownOptionsAndSourcesAreRefused(): void
@@ -95,7 +98,7 @@ final class InstallScriptTest extends IntegrationTestCase
 
         $nowhere = $this->runScript(['--from=' . $this->work . '/nowhere']);
         $this->assertSame(1, $nowhere->exitCode);
-        $refusal = '--from takes github, packagist, a repository URL or a directory';
+        $refusal = '--from takes packagist, github, a repository URL or a directory';
         $this->assertStringContainsString($refusal, $nowhere->stderr);
     }
 
