@@ -30,16 +30,15 @@ irm https://raw.githubusercontent.com/wuemv/composer-store/HEAD/install.php | ph
 
 Add `-- --dry-run` after `php` to see the commands without running them. In a clone, `php install.php --help` lists the other options: where to install from, and which Composer to run.
 
-Or run the commands yourself. The package is not on Packagist yet, so they install it from GitHub:
+Or run the commands yourself:
 
 ```sh
-composer global config repositories.composer-store vcs https://github.com/wuemv/composer-store
 # Composer 2.2+ asks before running a new plugin: allow this one first.
 composer global config allow-plugins.wuemv/composer-store true
-composer global require wuemv/composer-store:@dev
+composer global require wuemv/composer-store
 ```
 
-Once it is on Packagist, `composer global require wuemv/composer-store` after the `allow-plugins` line will do, or `--from=packagist` for the script.
+Both install the latest release from Packagist. To try the code on `main` instead, pass `--from=github` to the script. Installed from GitHub before the package was on Packagist? Run the script again: it removes the GitHub repository from your global Composer config and moves you to the latest release.
 
 From then on, `composer install`, `update`, `require` and `remove` go through the store:
 
@@ -188,6 +187,8 @@ A package comes from the store when its files are hard links of the store's (sam
 ```sh
 composer global remove wuemv/composer-store
 ```
+
+If you installed it from GitHub, `composer global config --unset repositories.composer-store` removes the repository too.
 
 Your projects keep working: the files in their `vendor/` are ordinary files that share their data with the store. To give a project its own copies again, reinstall its dependencies:
 
